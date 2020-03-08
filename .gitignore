@@ -1,0 +1,10 @@
+Debug/*
+x64/*
+.vscode/*
+.vs/*
+*.exe
+*.dll
+*.sln
+*.vcxproj*
+*.out
+test.cpp
