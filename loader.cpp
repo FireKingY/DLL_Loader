@@ -3,7 +3,6 @@
 #include "loader.h"
 using namespace std;
 
-
 DWORD PEFile::RVAToVA(DWORD RVA)
 {
     return RVA + reinterpret_cast<uint32_t>(this->base);
@@ -93,15 +92,34 @@ void PEFile::relocate()
     }
 }
 
-// void fixExportTable(PEFile& pf)
-// {
-//     PIMAGE_EXPORT_DIRECTORY pExDir = static_cast<PIMAGE_EXPORT_DIRECTORY>(pf.info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress);
-// }
+
+void* PEFile::getFuntionByName(const string& name)
+{
+    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(this->RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress));
+    static uint32_t* addressTable = reinterpret_cast<uint32_t*>(this->RVAToVA(pExDir->AddressOfFunctions));
+    static uint32_t* namePointerTable = reinterpret_cast<uint32_t*>(this->RVAToVA(pExDir->AddressOfNames));
+    static uint16_t* ordinalTable = reinterpret_cast<uint16_t*>(this->RVAToVA(pExDir->AddressOfNameOrdinals));
+
+    //get ordinal
+    auto namePointer = namePointerTable;
+    unsigned int count = 0;
+    for(; count<pExDir->NumberOfNames; ++count)
+    {
+        if (strcmp(name.c_str(), reinterpret_cast<char*>(this->RVAToVA(*namePointer))) == 0)
+            break;
+        ++namePointer;
+    }
+    if(count >= pExDir->NumberOfNames)
+        return nullptr;
+
+    auto rva = (addressTable[ordinalTable[count]]);
+    return reinterpret_cast<void*>(this->RVAToVA(rva));
+}
 
 void dlltest()
 {
 
-    auto hd = LoadLibrary("test.dll");
+    auto hd = LoadLibrary("C:\\Users\\Administrator\\source\\repos\\testDlll\\Debug\\testDlll.dll");
     if (hd == NULL)
     {
         int errCode = GetLastError();
@@ -109,17 +127,21 @@ void dlltest()
         FreeLibrary(hd);
         return;
     }
-    typedef void (*FUN)();
-    FUN f = (FUN)GetProcAddress(hd, (char *)(1));
-    f();
+    typedef int (*FUN)(int a, int b);
+    FUN f = (FUN)GetProcAddress(hd, "plus");
+    
+    cout << f(22, 33) << endl;
     FreeLibrary(hd);
     return;
 }
 
 int main()
 {
-    // dlltest();
+     dlltest();
     PEFile dll;
-    dll.loadFromFile("test.dll");
+    dll.loadFromFile("C:\\Users\\Administrator\\source\\repos\\testDlll\\Debug\\testDlll.dll");
+    typedef int (*FUN)(int a, int b);
+    FUN fun = reinterpret_cast<FUN>(dll.getFuntionByName("plus"));
+    cout << fun(22,33) << endl;
     dll.close();
 }
