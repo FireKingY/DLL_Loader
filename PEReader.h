@@ -2,6 +2,8 @@
 #include <vector>
 using namespace std;
 
+#define BUFFER_SIZE 1024
+
 struct PE_INFO32
 {
     IMAGE_DOS_HEADER DosHeader;
@@ -9,4 +11,8 @@ struct PE_INFO32
     vector<IMAGE_SECTION_HEADER> SectionHeaders;
 };
 
-#define BUFFER_SIZE 1024
+struct PEFile
+{
+    void* base;
+    PE_INFO32 info;
+};

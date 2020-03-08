@@ -5,17 +5,19 @@
 using namespace std;
 
 PE_INFO32 getPEInfo(ifstream &pe);
-void *loadDll(const string &dllName);
-void freeDll(void *base);
-void copyDllToMem(ifstream &pe, PE_INFO32 &pi, void *base);
-void relocate(void *dll, PE_INFO32 &pi);
+PEFile loadDll(const string &dllName);
+void freeDll(PEFile& pf);
+void copyDllToMem(ifstream &pe, PEFile& pf);
+void relocate(PEFile& pf);
+void dlltest();
 
 #define OFFSET_OF_NT_HEADER_OFFSET 0X3C
 int offsetNTHeader;
 
 int main()
 {
-    void *dll = loadDll("psapi.dll");
+   dlltest();
+    auto dll = loadDll("test.dll");
     freeDll(dll);
 }
 
@@ -31,59 +33,61 @@ void dlltest()
         return ;
     }
     typedef void(*FUN)();
-    FUN f = (FUN)GetProcAddress(hd, "fun");
+    FUN f = (FUN)GetProcAddress(hd, (char*)(1));
     f();
     FreeLibrary(hd);
     return ;
 }
 
-void *loadDll(const string &dllName)
+PEFile loadDll(const string &dllName)
 {
-    ifstream dll;
-    dll.open(dllName, ios_base::binary);
-    PE_INFO32 dllInfo = getPEInfo(dll);
+    PEFile pf;
+
+    ifstream dllStream;
+    dllStream.open(dllName, ios_base::binary);
+    pf.info = getPEInfo(dllStream);
 
     //allocate mem for image
-    void *base = VirtualAlloc(nullptr, dllInfo.NtHeaders.OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    copyDllToMem(dll, dllInfo, base);
-    relocate(base, dllInfo);
+    pf.base = VirtualAlloc(nullptr, pf.info.NtHeaders.OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    copyDllToMem(dllStream, pf);
+    relocate(pf);
 
-    dll.close();
-    return base;
+    dllStream.close();
+    return pf;
 }
 
-void freeDll(void *base)
+void freeDll(PEFile& pf)
 {
-    VirtualFree(base, 0, MEM_RELEASE);
+    VirtualFree(pf.base, 0, MEM_RELEASE);
 }
 
-PE_INFO32 getPEInfo(ifstream &pe)
+PE_INFO32 getPEInfo(ifstream &dllStream)
 {
     PE_INFO32 pi;
-    pe.seekg(0);
-    pe.read(reinterpret_cast<char *>(&(pi.DosHeader)), sizeof(pi.DosHeader)); //read dosHeader
-    pe.seekg(pi.DosHeader.e_lfanew);                                          //locate ntHeader
-    pe.read((char *)(&(pi.NtHeaders)), sizeof(pi.NtHeaders));                 // read ntHeader
+    dllStream.seekg(0);
+    dllStream.read(reinterpret_cast<char *>(&(pi.DosHeader)), sizeof(pi.DosHeader)); //read dosHeader
+    dllStream.seekg(pi.DosHeader.e_lfanew);                                          //locate ntHeader
+    dllStream.read((char *)(&(pi.NtHeaders)), sizeof(pi.NtHeaders));                 // read ntHeader
 
     IMAGE_SECTION_HEADER sectionHeader;
     for (int i = 0; i < pi.NtHeaders.FileHeader.NumberOfSections; ++i) // read sectionHeaders
     {
-        pe.read(reinterpret_cast<char *>(&sectionHeader), sizeof(sectionHeader));
+        dllStream.read(reinterpret_cast<char *>(&sectionHeader), sizeof(sectionHeader));
         pi.SectionHeaders.push_back(sectionHeader);
     }
 
     return pi;
 }
 
-void copyDllToMem(ifstream &pe, PE_INFO32 &pi, void *base)
+void copyDllToMem(ifstream &pe, PEFile& pf)
 {
 
     // copy sections to mem
     char buf[BUFFER_SIZE];
-    for (auto &sectionHeader : pi.SectionHeaders)
+    for (auto &sectionHeader : pf.info.SectionHeaders)
     {
-        decltype(sectionHeader.Misc.VirtualSize) remainSize = sectionHeader.Misc.VirtualSize;
-        void *curPos = reinterpret_cast<void *>(static_cast<uint64_t>(sectionHeader.VirtualAddress) + reinterpret_cast<uint64_t>(base));
+        decltype(sectionHeader.Misc.VirtualSize) remainSize = sectionHeader.SizeOfRawData;
+        void *curPos = reinterpret_cast<void *>(static_cast<uint64_t>(sectionHeader.VirtualAddress) + reinterpret_cast<uint64_t>(pf.base));
         pe.seekg(sectionHeader.PointerToRawData);
 
         while (remainSize > BUFFER_SIZE)
@@ -99,10 +103,10 @@ void copyDllToMem(ifstream &pe, PE_INFO32 &pi, void *base)
     return;
 }
 
-void relocate(void *dllBase, PE_INFO32 &pi)
+void relocate(PEFile& pf)
 {
-    void *pRelocateTable = reinterpret_cast<void *>(pi.NtHeaders.OptionalHeader.DataDirectory[5].VirtualAddress + reinterpret_cast<uint64_t>(dllBase));
-    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(pRelocateTable) + pi.NtHeaders.OptionalHeader.DataDirectory[5].Size);
+    void *pRelocateTable = reinterpret_cast<void *>(pf.info.NtHeaders.OptionalHeader.DataDirectory[5].VirtualAddress + reinterpret_cast<uint64_t>(pf.base));
+    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(pRelocateTable) + pf.info.NtHeaders.OptionalHeader.DataDirectory[5].Size);
 
     void *curTablePos = pRelocateTable;
     while (curTablePos < pRelocateTableEnd)
@@ -115,8 +119,8 @@ void relocate(void *dllBase, PE_INFO32 &pi)
         {
             if((*offset & 0xf000) != 0x3000)
                 continue;
-            void** pPData = reinterpret_cast<void**>(reinterpret_cast<uint64_t>(dllBase) + static_cast<uint64_t>(rel->VirtualAddress) + ((*offset) & 0x0fff));
-            *pPData = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(*pPData) + reinterpret_cast<uint64_t>(dllBase) - pi.NtHeaders.OptionalHeader.ImageBase);
+            void** pPData = reinterpret_cast<void**>(reinterpret_cast<uint64_t>(pf.base) + static_cast<uint64_t>(rel->VirtualAddress) + ((*offset) & 0x0fff));
+            *pPData = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(*pPData) + reinterpret_cast<uint64_t>(pf.base) - pf.info.NtHeaders.OptionalHeader.ImageBase);
         }
         curTablePos = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(curTablePos) + rel->SizeOfBlock);
 
