@@ -1,93 +1,54 @@
-#include <iostream>
 #include <fstream>
 #include <cstring>
-#include "PEReader.h"
+#include "loader.h"
 using namespace std;
 
-PE_INFO32 getPEInfo(ifstream &pe);
-PEFile loadDll(const string &dllName);
-void freeDll(PEFile& pf);
-void copyDllToMem(ifstream &pe, PEFile& pf);
-void relocate(PEFile& pf);
-void dlltest();
-
-#define OFFSET_OF_NT_HEADER_OFFSET 0X3C
-int offsetNTHeader;
-
-int main()
+void PEFile::loadFromFile(const string &dllName)
 {
-   dlltest();
-    auto dll = loadDll("test.dll");
-    freeDll(dll);
-}
-
-void dlltest()
-{
-
-    auto hd = LoadLibrary("test.dll");
-    if(hd == NULL)
-    {
-        int errCode = GetLastError();
-        cout << errCode << endl;
-        FreeLibrary(hd);
-        return ;
-    }
-    typedef void(*FUN)();
-    FUN f = (FUN)GetProcAddress(hd, (char*)(1));
-    f();
-    FreeLibrary(hd);
-    return ;
-}
-
-PEFile loadDll(const string &dllName)
-{
-    PEFile pf;
-
     ifstream dllStream;
     dllStream.open(dllName, ios_base::binary);
-    pf.info = getPEInfo(dllStream);
+    initPEInfo(dllStream);
 
     //allocate mem for image
-    pf.base = VirtualAlloc(nullptr, pf.info.NtHeaders.OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    copyDllToMem(dllStream, pf);
-    relocate(pf);
+    this->base = VirtualAlloc(nullptr, this->info.NtHeaders.OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    copyDllToMem(dllStream);
+    relocate();
 
     dllStream.close();
-    return pf;
+    return;
 }
 
-void freeDll(PEFile& pf)
+void PEFile::close()
 {
-    VirtualFree(pf.base, 0, MEM_RELEASE);
+    VirtualFree(this->base, 0, MEM_RELEASE);
 }
 
-PE_INFO32 getPEInfo(ifstream &dllStream)
+void PEFile::initPEInfo(ifstream &dllStream)
 {
-    PE_INFO32 pi;
     dllStream.seekg(0);
-    dllStream.read(reinterpret_cast<char *>(&(pi.DosHeader)), sizeof(pi.DosHeader)); //read dosHeader
-    dllStream.seekg(pi.DosHeader.e_lfanew);                                          //locate ntHeader
-    dllStream.read((char *)(&(pi.NtHeaders)), sizeof(pi.NtHeaders));                 // read ntHeader
+    dllStream.read(reinterpret_cast<char *>(&(this->info.DosHeader)), sizeof(this->info.DosHeader)); //read dosHeader
+    dllStream.seekg(this->info.DosHeader.e_lfanew);                                                  //locate ntHeader
+    dllStream.read((char *)(&(this->info.NtHeaders)), sizeof(this->info.NtHeaders));                 // read ntHeader
 
     IMAGE_SECTION_HEADER sectionHeader;
-    for (int i = 0; i < pi.NtHeaders.FileHeader.NumberOfSections; ++i) // read sectionHeaders
+    for (int i = 0; i < this->info.NtHeaders.FileHeader.NumberOfSections; ++i) // read sectionHeaders
     {
         dllStream.read(reinterpret_cast<char *>(&sectionHeader), sizeof(sectionHeader));
-        pi.SectionHeaders.push_back(sectionHeader);
+        this->info.SectionHeaders.push_back(sectionHeader);
     }
 
-    return pi;
+    return;
 }
 
-void copyDllToMem(ifstream &pe, PEFile& pf)
+void PEFile::copyDllToMem(ifstream &pe)
 {
 
     // copy sections to mem
     char buf[BUFFER_SIZE];
-    for (auto &sectionHeader : pf.info.SectionHeaders)
+    for (auto &sectionHeader : this->info.SectionHeaders)
     {
         decltype(sectionHeader.Misc.VirtualSize) remainSize = sectionHeader.SizeOfRawData;
-        void *curPos = reinterpret_cast<void *>(static_cast<uint64_t>(sectionHeader.VirtualAddress) + reinterpret_cast<uint64_t>(pf.base));
+        void *curPos = reinterpret_cast<void *>(static_cast<uint64_t>(sectionHeader.VirtualAddress) + reinterpret_cast<uint64_t>(this->base));
         pe.seekg(sectionHeader.PointerToRawData);
 
         while (remainSize > BUFFER_SIZE)
@@ -103,10 +64,10 @@ void copyDllToMem(ifstream &pe, PEFile& pf)
     return;
 }
 
-void relocate(PEFile& pf)
+void PEFile::relocate()
 {
-    void *pRelocateTable = reinterpret_cast<void *>(pf.info.NtHeaders.OptionalHeader.DataDirectory[5].VirtualAddress + reinterpret_cast<uint64_t>(pf.base));
-    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(pRelocateTable) + pf.info.NtHeaders.OptionalHeader.DataDirectory[5].Size);
+    void *pRelocateTable = reinterpret_cast<void *>(this->info.NtHeaders.OptionalHeader.DataDirectory[5].VirtualAddress + reinterpret_cast<uint64_t>(this->base));
+    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(pRelocateTable) + this->info.NtHeaders.OptionalHeader.DataDirectory[5].Size);
 
     void *curTablePos = pRelocateTable;
     while (curTablePos < pRelocateTableEnd)
@@ -117,12 +78,42 @@ void relocate(PEFile& pf)
         for (; reinterpret_cast<uint64_t>(offset) - reinterpret_cast<uint64_t>(offsets_start) < rel->SizeOfBlock - sizeof(*rel);
              offset = reinterpret_cast<uint16_t *>(reinterpret_cast<uint64_t>(offset) + sizeof(uint16_t)))
         {
-            if((*offset & 0xf000) != 0x3000)
+            if ((*offset & 0xf000) != 0x3000)
                 continue;
-            void** pPData = reinterpret_cast<void**>(reinterpret_cast<uint64_t>(pf.base) + static_cast<uint64_t>(rel->VirtualAddress) + ((*offset) & 0x0fff));
-            *pPData = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(*pPData) + reinterpret_cast<uint64_t>(pf.base) - pf.info.NtHeaders.OptionalHeader.ImageBase);
+            void **pPData = reinterpret_cast<void **>(reinterpret_cast<uint64_t>(this->base) + static_cast<uint64_t>(rel->VirtualAddress) + ((*offset) & 0x0fff));
+            *pPData = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(*pPData) + reinterpret_cast<uint64_t>(this->base) - this->info.NtHeaders.OptionalHeader.ImageBase);
         }
-        curTablePos = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(curTablePos) + rel->SizeOfBlock);
-
+        curTablePos = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(curTablePos) + rel->SizeOfBlock);
     }
+}
+
+// void fixExportTable(PEFile& pf)
+// {
+//     PIMAGE_EXPORT_DIRECTORY pExDir = static_cast<PIMAGE_EXPORT_DIRECTORY>(pf.info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress);
+// }
+
+void dlltest()
+{
+
+    auto hd = LoadLibrary("test.dll");
+    if (hd == NULL)
+    {
+        int errCode = GetLastError();
+        cout << errCode << endl;
+        FreeLibrary(hd);
+        return;
+    }
+    typedef void (*FUN)();
+    FUN f = (FUN)GetProcAddress(hd, (char *)(1));
+    f();
+    FreeLibrary(hd);
+    return;
+}
+
+int main()
+{
+    dlltest();
+    PEFile dll;
+    dll.loadFromFile("test.dll");
+    dll.close();
 }
