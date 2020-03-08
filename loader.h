@@ -20,6 +20,7 @@ public:
 
     void loadFromFile(const string &dllName);
     void close();
+    DWORD RVAToVA(DWORD RVA);
 
 private:
     void initPEInfo(ifstream &pe);

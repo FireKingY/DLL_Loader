@@ -3,6 +3,12 @@
 #include "loader.h"
 using namespace std;
 
+
+DWORD PEFile::RVAToVA(DWORD RVA)
+{
+    return RVA + reinterpret_cast<uint32_t>(this->base);
+}
+
 void PEFile::loadFromFile(const string &dllName)
 {
     ifstream dllStream;
@@ -48,7 +54,7 @@ void PEFile::copyDllToMem(ifstream &pe)
     for (auto &sectionHeader : this->info.SectionHeaders)
     {
         decltype(sectionHeader.Misc.VirtualSize) remainSize = sectionHeader.SizeOfRawData;
-        void *curPos = reinterpret_cast<void *>(static_cast<uint64_t>(sectionHeader.VirtualAddress) + reinterpret_cast<uint64_t>(this->base));
+        void *curPos = reinterpret_cast<void *>(this->RVAToVA(sectionHeader.VirtualAddress));
         pe.seekg(sectionHeader.PointerToRawData);
 
         while (remainSize > BUFFER_SIZE)
@@ -56,7 +62,7 @@ void PEFile::copyDllToMem(ifstream &pe)
             pe.read(buf, BUFFER_SIZE);
             memcpy(curPos, buf, BUFFER_SIZE);
             remainSize -= BUFFER_SIZE;
-            curPos = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(curPos) + BUFFER_SIZE);
+            curPos = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(curPos) + BUFFER_SIZE);
         }
         pe.read(buf, remainSize);
         memcpy(curPos, buf, remainSize);
@@ -66,24 +72,24 @@ void PEFile::copyDllToMem(ifstream &pe)
 
 void PEFile::relocate()
 {
-    void *pRelocateTable = reinterpret_cast<void *>(this->info.NtHeaders.OptionalHeader.DataDirectory[5].VirtualAddress + reinterpret_cast<uint64_t>(this->base));
-    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(pRelocateTable) + this->info.NtHeaders.OptionalHeader.DataDirectory[5].Size);
+    void *pRelocateTable = reinterpret_cast<void *>(this->RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[5].VirtualAddress));
+    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(pRelocateTable) + this->info.NtHeaders.OptionalHeader.DataDirectory[5].Size);
 
     void *curTablePos = pRelocateTable;
     while (curTablePos < pRelocateTableEnd)
     {
         PIMAGE_BASE_RELOCATION rel = static_cast<PIMAGE_BASE_RELOCATION>(curTablePos);
-        uint16_t *offsets_start = reinterpret_cast<uint16_t *>(reinterpret_cast<uint64_t>(rel) + sizeof(*rel));
+        uint16_t *offsets_start = reinterpret_cast<uint16_t *>(reinterpret_cast<uint32_t>(rel) + sizeof(*rel));
         uint16_t *offset = offsets_start;
-        for (; reinterpret_cast<uint64_t>(offset) - reinterpret_cast<uint64_t>(offsets_start) < rel->SizeOfBlock - sizeof(*rel);
-             offset = reinterpret_cast<uint16_t *>(reinterpret_cast<uint64_t>(offset) + sizeof(uint16_t)))
+        for (; reinterpret_cast<uint32_t>(offset) - reinterpret_cast<uint32_t>(offsets_start) < rel->SizeOfBlock - sizeof(*rel);
+             offset = reinterpret_cast<uint16_t *>(reinterpret_cast<uint32_t>(offset) + sizeof(uint16_t)))
         {
             if ((*offset & 0xf000) != 0x3000)
                 continue;
-            void **pPData = reinterpret_cast<void **>(reinterpret_cast<uint64_t>(this->base) + static_cast<uint64_t>(rel->VirtualAddress) + ((*offset) & 0x0fff));
-            *pPData = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(*pPData) + reinterpret_cast<uint64_t>(this->base) - this->info.NtHeaders.OptionalHeader.ImageBase);
+            void **pPData = reinterpret_cast<void **>(this->RVAToVA(rel->VirtualAddress) + ((*offset) & 0x0fff));
+            *pPData = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(*pPData) + reinterpret_cast<uint32_t>(this->base) - this->info.NtHeaders.OptionalHeader.ImageBase);
         }
-        curTablePos = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(curTablePos) + rel->SizeOfBlock);
+        curTablePos = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(curTablePos) + rel->SizeOfBlock);
     }
 }
 
@@ -112,7 +118,7 @@ void dlltest()
 
 int main()
 {
-    dlltest();
+    // dlltest();
     PEFile dll;
     dll.loadFromFile("test.dll");
     dll.close();
