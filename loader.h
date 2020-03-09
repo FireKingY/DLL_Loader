@@ -28,9 +28,5 @@ private:
     void initPEInfo(ifstream &pe);
     void copyDllToMem(ifstream &pe);
     void relocate();
+    void fixImportTable();
 };
-
-#define EXPORT_ADDRESS_TABLE 0
-#define EXPORT_NAME_POINTER_TABLE 1
-#define EXPORT_ORDINAL_TABLE 2
-#define EXPORT_NAMES 3

@@ -14,10 +14,11 @@ void PEFile::loadFromFile(const string &dllName)
     dllStream.open(dllName, ios_base::binary);
     initPEInfo(dllStream);
 
-    //allocate mem for image
+    //allocate mem for image 可读可写可执行
     this->base = VirtualAlloc(nullptr, this->info.NtHeaders.OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     copyDllToMem(dllStream);
     relocate();
+    fixImportTable();
 
     dllStream.close();
     return;
@@ -53,7 +54,7 @@ void PEFile::copyDllToMem(ifstream &pe)
     for (auto &sectionHeader : this->info.SectionHeaders)
     {
         decltype(sectionHeader.Misc.VirtualSize) remainSize = sectionHeader.SizeOfRawData;
-        void *curPos = reinterpret_cast<void *>(this->RVAToVA(sectionHeader.VirtualAddress));
+        void *curPos = reinterpret_cast<void *>(RVAToVA(sectionHeader.VirtualAddress));
         pe.seekg(sectionHeader.PointerToRawData);
 
         while (remainSize > BUFFER_SIZE)
@@ -71,7 +72,7 @@ void PEFile::copyDllToMem(ifstream &pe)
 
 void PEFile::relocate()
 {
-    void *pRelocateTable = reinterpret_cast<void *>(this->RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[5].VirtualAddress));
+    void *pRelocateTable = reinterpret_cast<void *>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[5].VirtualAddress));
     void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(pRelocateTable) + this->info.NtHeaders.OptionalHeader.DataDirectory[5].Size);
 
     void *curTablePos = pRelocateTable;
@@ -83,9 +84,9 @@ void PEFile::relocate()
         for (; reinterpret_cast<uint32_t>(offset) - reinterpret_cast<uint32_t>(offsets_start) < rel->SizeOfBlock - sizeof(*rel);
              offset = reinterpret_cast<uint16_t *>(reinterpret_cast<uint32_t>(offset) + sizeof(uint16_t)))
         {
-            if ((*offset & 0xf000) != 0x3000)
+            if ((*offset & 0xf000) != 0x3000) //高四位为0x0011时有效，否则为占位项
                 continue;
-            void **pPData = reinterpret_cast<void **>(this->RVAToVA(rel->VirtualAddress) + ((*offset) & 0x0fff));
+            void **pPData = reinterpret_cast<void **>(RVAToVA(rel->VirtualAddress) + ((*offset) & 0x0fff));
             *pPData = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(*pPData) + reinterpret_cast<uint32_t>(this->base) - this->info.NtHeaders.OptionalHeader.ImageBase);
         }
         curTablePos = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(curTablePos) + rel->SizeOfBlock);
@@ -94,10 +95,10 @@ void PEFile::relocate()
 
 void *PEFile::getFuntionByName(const string &name)
 {
-    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(this->RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress));
-    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(this->RVAToVA(pExDir->AddressOfFunctions));
-    static uint32_t *namePointerTable = reinterpret_cast<uint32_t *>(this->RVAToVA(pExDir->AddressOfNames));
-    static uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(this->RVAToVA(pExDir->AddressOfNameOrdinals));
+    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress));
+    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions));
+    static uint32_t *namePointerTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfNames));
+    static uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(RVAToVA(pExDir->AddressOfNameOrdinals));
 
     //get ordinal
     auto namePointer = namePointerTable;
@@ -106,7 +107,7 @@ void *PEFile::getFuntionByName(const string &name)
     //搜索导出名字表中是否存在对应名字的函数
     for (; count < pExDir->NumberOfNames; ++count)
     {
-        if (strcmp(name.c_str(), reinterpret_cast<char *>(this->RVAToVA(*namePointer))) == 0)
+        if (strcmp(name.c_str(), reinterpret_cast<char *>(RVAToVA(*namePointer))) == 0)
             break;
         ++namePointer;
     }
@@ -114,16 +115,37 @@ void *PEFile::getFuntionByName(const string &name)
         return nullptr;
 
     auto rva = (addressTable[ordinalTable[count]]); //序号表和名字表是一一对应的， 序号表中存放的内容为该函数在地址表中索引
-    return reinterpret_cast<void *>(this->RVAToVA(rva));
+    return reinterpret_cast<void *>(RVAToVA(rva));
 }
 void *PEFile::getFuntionByOrd(unsigned int ord)
 {
-    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(this->RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress));
-    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(this->RVAToVA(pExDir->AddressOfFunctions));
-    static uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(this->RVAToVA(pExDir->AddressOfNameOrdinals));
+    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress));
+    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions));
 
     ord -= pExDir->Base; // ordinal table中存储的是函数在 address table中的索引
-    return reinterpret_cast<void *>(this->RVAToVA(addressTable[ord]));
+    return reinterpret_cast<void *>(RVAToVA(addressTable[ord]));
+}
+
+void PEFile::fixImportTable()
+{
+    PIMAGE_IMPORT_DESCRIPTOR pImDes = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[1].VirtualAddress));
+
+    while(pImDes->Characteristics != 0) // 0 for terminating null import descriptor
+    {
+        char* moudleName = reinterpret_cast<char*>(RVAToVA(pImDes->Name));
+        auto hMoudle = LoadLibrary(moudleName);
+        char** pPAddressTable = reinterpret_cast<char**>(RVAToVA(pImDes->FirstThunk));
+        while(*pPAddressTable != nullptr)
+        {
+            uint16_t* pHint = reinterpret_cast<uint16_t*>(RVAToVA(reinterpret_cast<uint32_t>(*pPAddressTable)));
+            char* pFunctionName = reinterpret_cast<char*>(pHint + 1);
+            auto fun = GetProcAddress(hMoudle, pFunctionName);
+            *pPAddressTable = reinterpret_cast<char*>(fun);
+            ++pPAddressTable;
+        }
+
+        ++pImDes;
+    }
 }
 
 void dlltest()
@@ -151,8 +173,8 @@ int main()
     PEFile dll;
     dll.loadFromFile("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
     typedef const char *(*FUN)(int a, int b);
-    // FUN fun = reinterpret_cast<FUN>(dll.getFuntionByName("plus"));
-    FUN fun = reinterpret_cast<FUN>(dll.getFuntionByOrd(5));
+     FUN fun = reinterpret_cast<FUN>(dll.getFuntionByName("sub"));
+   //FUN fun = reinterpret_cast<FUN>(dll.getFuntionByOrd(4));
     if (fun != nullptr)
         cout << fun(22,33) << endl;
     dll.close();
