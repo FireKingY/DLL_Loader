@@ -22,6 +22,7 @@ public:
     void close();
     DWORD RVAToVA(DWORD RVA);
     void* getFuntionByName(const string& name);
+    void* getFuntionByOrd(unsigned int ord);
 
 private:
     void initPEInfo(ifstream &pe);

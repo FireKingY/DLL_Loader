@@ -92,34 +92,44 @@ void PEFile::relocate()
     }
 }
 
-
-void* PEFile::getFuntionByName(const string& name)
+void *PEFile::getFuntionByName(const string &name)
 {
     static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(this->RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress));
-    static uint32_t* addressTable = reinterpret_cast<uint32_t*>(this->RVAToVA(pExDir->AddressOfFunctions));
-    static uint32_t* namePointerTable = reinterpret_cast<uint32_t*>(this->RVAToVA(pExDir->AddressOfNames));
-    static uint16_t* ordinalTable = reinterpret_cast<uint16_t*>(this->RVAToVA(pExDir->AddressOfNameOrdinals));
+    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(this->RVAToVA(pExDir->AddressOfFunctions));
+    static uint32_t *namePointerTable = reinterpret_cast<uint32_t *>(this->RVAToVA(pExDir->AddressOfNames));
+    static uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(this->RVAToVA(pExDir->AddressOfNameOrdinals));
 
     //get ordinal
     auto namePointer = namePointerTable;
     unsigned int count = 0;
-    for(; count<pExDir->NumberOfNames; ++count)
+
+    //搜索导出名字表中是否存在对应名字的函数
+    for (; count < pExDir->NumberOfNames; ++count)
     {
-        if (strcmp(name.c_str(), reinterpret_cast<char*>(this->RVAToVA(*namePointer))) == 0)
+        if (strcmp(name.c_str(), reinterpret_cast<char *>(this->RVAToVA(*namePointer))) == 0)
             break;
         ++namePointer;
     }
-    if(count >= pExDir->NumberOfNames)
+    if (count >= pExDir->NumberOfNames)
         return nullptr;
 
-    auto rva = (addressTable[ordinalTable[count]]);
-    return reinterpret_cast<void*>(this->RVAToVA(rva));
+    auto rva = (addressTable[ordinalTable[count]]); //序号表和名字表是一一对应的， 序号表中存放的内容为该函数在地址表中索引
+    return reinterpret_cast<void *>(this->RVAToVA(rva));
+}
+void *PEFile::getFuntionByOrd(unsigned int ord)
+{
+    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(this->RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress));
+    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(this->RVAToVA(pExDir->AddressOfFunctions));
+    static uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(this->RVAToVA(pExDir->AddressOfNameOrdinals));
+
+    ord -= pExDir->Base; // ordinal table中存储的是函数在 address table中的索引
+    return reinterpret_cast<void *>(this->RVAToVA(addressTable[ord]));
 }
 
 void dlltest()
 {
 
-    auto hd = LoadLibrary("C:\\Users\\Administrator\\source\\repos\\testDlll\\Debug\\testDlll.dll");
+    auto hd = LoadLibrary("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
     if (hd == NULL)
     {
         int errCode = GetLastError();
@@ -127,21 +137,23 @@ void dlltest()
         FreeLibrary(hd);
         return;
     }
-    typedef int (*FUN)(int a, int b);
-    FUN f = (FUN)GetProcAddress(hd, "plus");
-    
-    cout << f(22, 33) << endl;
+    typedef const char *(*FUN)(int a, int b);
+    FUN f = (FUN)GetProcAddress(hd, (char *)5);
+    if (f != nullptr)
+        cout << f(1, 1) << endl;
     FreeLibrary(hd);
     return;
 }
 
 int main()
 {
-     dlltest();
+    // dlltest();
     PEFile dll;
-    dll.loadFromFile("C:\\Users\\Administrator\\source\\repos\\testDlll\\Debug\\testDlll.dll");
-    typedef int (*FUN)(int a, int b);
-    FUN fun = reinterpret_cast<FUN>(dll.getFuntionByName("plus"));
-    cout << fun(22,33) << endl;
+    dll.loadFromFile("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
+    typedef const char *(*FUN)(int a, int b);
+    // FUN fun = reinterpret_cast<FUN>(dll.getFuntionByName("plus"));
+    FUN fun = reinterpret_cast<FUN>(dll.getFuntionByOrd(5));
+    if (fun != nullptr)
+        cout << fun(22,33) << endl;
     dll.close();
 }
