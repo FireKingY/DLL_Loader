@@ -51,10 +51,24 @@ void PEFile::copyDllToMem(ifstream &pe)
 
     // copy sections to mem
     char buf[BUFFER_SIZE];
+    //content before sections
+    uint32_t remainSize = info.SectionHeaders[0].PointerToRawData;
+    void *curPos = reinterpret_cast<void *>(RVAToVA(0));
+    pe.seekg(ios::beg);
+    while (remainSize > BUFFER_SIZE)
+    {
+        pe.read(buf, BUFFER_SIZE);
+        memcpy(curPos, buf, BUFFER_SIZE);
+        remainSize -= BUFFER_SIZE;
+        curPos = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(curPos) + BUFFER_SIZE);
+    }
+    pe.read(buf, remainSize);
+    memcpy(curPos, buf, remainSize);
+
     for (auto &sectionHeader : this->info.SectionHeaders)
     {
-        decltype(sectionHeader.Misc.VirtualSize) remainSize = sectionHeader.SizeOfRawData;
-        void *curPos = reinterpret_cast<void *>(RVAToVA(sectionHeader.VirtualAddress));
+        remainSize = sectionHeader.SizeOfRawData;
+        curPos = reinterpret_cast<void *>(RVAToVA(sectionHeader.VirtualAddress));
         pe.seekg(sectionHeader.PointerToRawData);
 
         while (remainSize > BUFFER_SIZE)
@@ -72,8 +86,8 @@ void PEFile::copyDllToMem(ifstream &pe)
 
 void PEFile::relocate()
 {
-    void *pRelocateTable = reinterpret_cast<void *>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[5].VirtualAddress));
-    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(pRelocateTable) + this->info.NtHeaders.OptionalHeader.DataDirectory[5].Size);
+    void *pRelocateTable = reinterpret_cast<void *>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress));
+    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(pRelocateTable) + this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size);
 
     void *curTablePos = pRelocateTable;
     while (curTablePos < pRelocateTableEnd)
@@ -95,7 +109,7 @@ void PEFile::relocate()
 
 void *PEFile::getFuntionByName(const string &name)
 {
-    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress));
+    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress));
     static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions));
     static uint32_t *namePointerTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfNames));
     static uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(RVAToVA(pExDir->AddressOfNameOrdinals));
@@ -119,7 +133,7 @@ void *PEFile::getFuntionByName(const string &name)
 }
 void *PEFile::getFuntionByOrd(unsigned int ord)
 {
-    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[0].VirtualAddress));
+    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress));
     static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions));
 
     ord -= pExDir->Base; // ordinal table中存储的是函数在 address table中的索引
@@ -128,24 +142,64 @@ void *PEFile::getFuntionByOrd(unsigned int ord)
 
 void PEFile::fixImportTable()
 {
-    PIMAGE_IMPORT_DESCRIPTOR pImDes = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[1].VirtualAddress));
-
-    while(pImDes->Characteristics != 0) // 0 for terminating null import descriptor
+    PIMAGE_IMPORT_DESCRIPTOR pImDes = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress));
+    // PIMAGE_BOUND_IMPORT_DESCRIPTOR pBImDes = reinterpret_cast<PIMAGE_BOUND_IMPORT_DESCRIPTOR>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT].VirtualAddress));
+    while (pImDes->Characteristics != 0) // 0 for terminating null import descriptor
     {
-        char* moudleName = reinterpret_cast<char*>(RVAToVA(pImDes->Name));
+        // switch (pImDes->TimeDateStamp)
+        // {
+        // 未绑定导入
+        // case 0:
+        // {
+        char *moudleName = reinterpret_cast<char *>(RVAToVA(pImDes->Name));
         auto hMoudle = LoadLibrary(moudleName);
-        char** pPAddressTable = reinterpret_cast<char**>(RVAToVA(pImDes->FirstThunk));
-        while(*pPAddressTable != nullptr)
+        void **pPAddressTable = reinterpret_cast<void **>(RVAToVA(pImDes->FirstThunk));
+        char **pPNameTable = reinterpret_cast<char **>(RVAToVA(pImDes->OriginalFirstThunk));
+
+        while (*pPNameTable != nullptr) // end of imports
         {
-            uint16_t* pHint = reinterpret_cast<uint16_t*>(RVAToVA(reinterpret_cast<uint32_t>(*pPAddressTable)));
-            char* pFunctionName = reinterpret_cast<char*>(pHint + 1);
+            if (IMAGE_SNAP_BY_ORDINAL32(reinterpret_cast<uint32_t>(*pPNameTable)))
+            {
+                // 按序号导入
+                //TODO
+                continue;
+            }
+            uint16_t *pHint = reinterpret_cast<uint16_t *>(RVAToVA(reinterpret_cast<uint32_t>(*pPNameTable)));
+            char *pFunctionName = reinterpret_cast<char *>(pHint + 1);
             auto fun = GetProcAddress(hMoudle, pFunctionName);
-            *pPAddressTable = reinterpret_cast<char*>(fun);
+            if(reinterpret_cast<uint32_t>(fun) == reinterpret_cast<uint32_t>(*pPAddressTable))
+                break;
+            *pPAddressTable = reinterpret_cast<void *>(fun);
             ++pPAddressTable;
+            ++pPNameTable;
         }
 
+        //     break;
+        // }
+
+        // 绑定导入 IAT内为函数绝对地址
+        // case 0xffffffff:
+        // {
+        //     // bool needFix = false;
+        //     //检查timestamp
+
+        //     break;
+        // }
+        // default:
+        //     break;
+        // }
         ++pImDes;
     }
+
+    // while (!(pBImDes->TimeDateStamp == 0 && pBImDes->OffsetModuleName == 0 && pBImDes->NumberOfModuleForwarderRefs == 0))
+    // {
+    //    // PIMAGE_BOUND_FORWARDER_REF pImBFwR = reinterpret_cast<PIMAGE_BOUND_FORWARDER_REF>(pBImDes);
+    //     // fix if stamp does not equal
+    //     if (pBImDes->TimeDateStamp != info.NtHeaders.FileHeader.TimeDateStamp)
+    //     {
+    //         cout << "need fix" << endl;
+    //     }
+    // }
 }
 
 void dlltest()
@@ -173,9 +227,9 @@ int main()
     PEFile dll;
     dll.loadFromFile("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
     typedef const char *(*FUN)(int a, int b);
-     FUN fun = reinterpret_cast<FUN>(dll.getFuntionByName("sub"));
-   //FUN fun = reinterpret_cast<FUN>(dll.getFuntionByOrd(4));
+    FUN fun = reinterpret_cast<FUN>(dll.getFuntionByName("msg"));
+    //FUN fun = reinterpret_cast<FUN>(dll.getFuntionByOrd(4));
     if (fun != nullptr)
-        cout << fun(22,33) << endl;
+        cout << fun(22, 33) << endl;
     dll.close();
 }
