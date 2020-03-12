@@ -1,6 +1,7 @@
 #include <fstream>
 #include <cstring>
 #include "loader.h"
+#include "def.h"
 using namespace std;
 
 DWORD PEFile::RVAToVA(DWORD RVA)
@@ -142,6 +143,7 @@ void *PEFile::getFuntionByOrd(unsigned int ord)
 
 void PEFile::fixImportTable()
 {
+    // FIXME: 未处理绑定导入表
     PIMAGE_IMPORT_DESCRIPTOR pImDes = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress));
     // PIMAGE_BOUND_IMPORT_DESCRIPTOR pBImDes = reinterpret_cast<PIMAGE_BOUND_IMPORT_DESCRIPTOR>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT].VirtualAddress));
     while (pImDes->Characteristics != 0) // 0 for terminating null import descriptor

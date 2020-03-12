@@ -14,3 +14,20 @@
     直接导入
     绑定导入
     延迟导入
+
+    按名字导入
+    按序号导入
+
+
+
+typedef struct _IMAGE_THUNK_DATA32 {
+    union {
+        DWORD ForwarderString;      // PBYTE
+        DWORD Function;             // PDWORD
+        DWORD Ordinal;
+        DWORD AddressOfData;        // PIMAGE_IMPORT_BY_NAME
+    } u1;
+} IMAGE_THUNK_DATA32;
+typedef IMAGE_THUNK_DATA32 * PIMAGE_THUNK_DATA32;
+ForwarderString是转发用的，暂时不用考虑，Function表示函数地址，如果是按序号导入Ordinal就有用了，若是按名字导入AddressOfData便指向名字信息。可以看出这个结构体就是一个大的union，大家都知道union虽包含多个域但是在不同时刻代表不同的意义那到底应该是名字还是序号，该如何区分呢？可以通过Ordinal判断，如果Ordinal的最高位是1，就是按序号导入的，这时候，低16位就是导入序号，如果最高位是0，则AddressOfData是一个RVA，指向一个IMAGE_IMPORT_BY_NAME结构，用来保存名字信息，由于Ordinal和AddressOfData实际上是同一个内存空间，所以AddressOfData其实只有低31位可以表示RVA，但是一个PE文件不可能超过2G，所以最高位永远为0，这样设计很合理的利用了空间。实际编写代码的时候微软提供两个宏定义处理序号导入：IMAGE_SNAP_BY_ORDINAL判断是否按序号导入，IMAGE_ORDINAL用来获取导入序号。
+

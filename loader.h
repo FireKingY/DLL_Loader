@@ -3,7 +3,6 @@
 #include <iostream>
 using namespace std;
 
-#define BUFFER_SIZE 1024
 
 struct PE_INFO32
 {
