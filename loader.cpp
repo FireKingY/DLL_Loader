@@ -17,7 +17,7 @@ void Loader::loadEncryptedDlls(fs::path &filePath)
             continue;
         }
         else
-            dllInfo.count = 0;
+            dllInfo.count = 1;
         istream dllStream(dll.pStBuf);
         loadfromstream(dllInfo, dllStream);
     }
@@ -77,7 +77,7 @@ void Loader::initPEInfo(MoudleInfo &dllInfo, istream &dllStream)
     dllStream.seekg(0);
     dllStream.read(reinterpret_cast<char *>(&(dllInfo.peInfo.DosHeader)), sizeof(dllInfo.peInfo.DosHeader)); //read dosHeader
     dllStream.seekg(dllInfo.peInfo.DosHeader.e_lfanew);                                                      //locate ntHeader
-    dllStream.read((char *)(&(dllInfo.peInfo.NtHeaders)), sizeof(dllInfo.peInfo.NtHeaders)); // read ntHeader
+    dllStream.read((char *)(&(dllInfo.peInfo.NtHeaders)), sizeof(dllInfo.peInfo.NtHeaders));                 // read ntHeader
 
     IMAGE_SECTION_HEADER sectionHeader;
     for (int i = 0; i < dllInfo.peInfo.NtHeaders.FileHeader.NumberOfSections; ++i) // read sectionHeaders
@@ -200,17 +200,21 @@ void Loader::fixImportTable(MoudleInfo &dllInfo)
         void **pPAddressTable = reinterpret_cast<void **>(RVAToVA(pImDes->FirstThunk, dllInfo));
         char **pPNameTable = reinterpret_cast<char **>(RVAToVA(pImDes->OriginalFirstThunk, dllInfo));
 
+        void *fun = nullptr;
         while (*pPNameTable != nullptr) // end of imports
         {
             if (IMAGE_SNAP_BY_ORDINAL32(reinterpret_cast<uint32_t>(*pPNameTable)))
             {
                 // 按序号导入
                 //TODO
-                continue;
+                fun = (void*)GetProcAddress(hMoudle, (char*)((uint32_t)(*pPNameTable) & 0xffff));
             }
-            uint16_t *pHint = reinterpret_cast<uint16_t *>(RVAToVA(reinterpret_cast<uint32_t>(*pPNameTable), dllInfo));
-            char *pFunctionName = reinterpret_cast<char *>(pHint + 1);
-            auto fun = GetProcAddress(hMoudle, pFunctionName);
+            else
+            {
+                uint16_t *pHint = reinterpret_cast<uint16_t *>(RVAToVA(reinterpret_cast<uint32_t>(*pPNameTable), dllInfo));
+                char *pFunctionName = reinterpret_cast<char *>(pHint + 1);
+                fun = (void *)GetProcAddress(hMoudle, pFunctionName);
+            }
             if (reinterpret_cast<uint32_t>(fun) == reinterpret_cast<uint32_t>(*pPAddressTable))
                 break;
             *pPAddressTable = reinterpret_cast<void *>(fun);
@@ -270,8 +274,8 @@ void encrypt()
 
     Encrypter cp;
     vector<fs::path> fileNames;
-    fileNames.push_back("1.dll");
-    fileNames.push_back("2.dll");
+    // fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
+    fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\test2\\Release\\test2.dll");
     cp.encryptFiles(fileNames, "output");
 }
 
@@ -283,18 +287,18 @@ int main()
     auto path = fs::current_path() / "output";
     loader.loadEncryptedDlls(path);
 
-    auto moudleInfo1 = loader.dllMap["1.dll"];
-    auto moudleInfo2 = loader.dllMap["2.dll"];
+    // auto moudleInfo1 = loader.dllMap["testDlll.dll"];
+    auto moudleInfo2 = loader.dllMap["test2.dll"];
 
-    typedef const char *(*FUN)(int a, int b);
-    FUN fun1 = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo1, "msg"));
-    FUN fun2 = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo2, "msg"));
+    typedef void (*FUN)();
+    // FUN fun1 = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo1, "msgBox"));
+    FUN fun2 = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo2, "hello"));
 
-    if (fun1 != nullptr)
-        cout << fun1(22, 33) << endl;
+    // if (fun1 != nullptr)
+    //     fun1();
     if (fun2 != nullptr)
-        cout << fun2(22, 33) << endl;
+        fun2();
 
-    loader.unloadMoudle(moudleInfo1);
-    loader.unloadMoudle(moudleInfo2);
+    // loader.unloadMoudle(moudleInfo1);
+    // loader.unloadMoudle(moudleInfo2);
 }
