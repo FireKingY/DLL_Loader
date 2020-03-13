@@ -4,57 +4,99 @@
 #include "def.h"
 using namespace std;
 
-DWORD PEFile::RVAToVA(DWORD RVA)
+void Loader::loadEncryptedDlls(fs::path &filePath)
 {
-    return RVA + reinterpret_cast<uint32_t>(this->base);
+    auto dlls = encrypter.decryptFile(filePath);
+    // istream dllStream(nullptr);
+    for (auto &dll : dlls)
+    {
+        auto &dllInfo = dllMap[dll.fileName];
+        if (dllInfo.count > 0)
+        {
+            ++dllInfo.count;
+            continue;
+        }
+        else
+            dllInfo.count = 0;
+        istream dllStream(dll.pStBuf);
+        loadfromstream(dllInfo, dllStream);
+    }
 }
 
-void PEFile::loadFromFile(const string &dllName)
+DWORD Loader::RVAToVA(DWORD RVA, MoudleInfo &dllInfo)
 {
-    ifstream dllStream;
-    dllStream.open(dllName, ios_base::binary);
-    initPEInfo(dllStream);
+    return RVA + reinterpret_cast<uint32_t>(dllInfo.base);
+}
 
+void Loader::loadfromstream(MoudleInfo &dllInfo, istream &dllStream)
+{
+
+    initPEInfo(dllInfo, dllStream);
     //allocate mem for image 可读可写可执行
-    this->base = VirtualAlloc(nullptr, this->info.NtHeaders.OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    copyDllToMem(dllStream);
-    relocate();
-    fixImportTable();
+    dllInfo.base = VirtualAlloc(nullptr, dllInfo.peInfo.NtHeaders.OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    copyDllToMem(dllInfo, dllStream);
+    relocate(dllInfo);
+    fixImportTable(dllInfo);
+}
+void Loader::loadFromFile(const fs::path &filePath)
+{
+    MoudleInfo &dllInfo = dllMap[filePath.filename().string()];
+    // FIXME: 多线程安全？
+    if (dllInfo.count > 0)
+    {
+        ++dllInfo.count;
+        return;
+    }
+    else
+        dllInfo.count = 1;
 
+    ifstream dllStream;
+    dllStream.open(filePath, ios_base::binary);
+    loadfromstream(dllInfo, dllStream);
     dllStream.close();
+
     return;
 }
 
-void PEFile::close()
+void Loader::unloadMoudle(MoudleInfo &dllInfo)
 {
-    VirtualFree(this->base, 0, MEM_RELEASE);
+    // FIXME:出于多线程考虑，dllInfo需要加锁？
+    if (dllInfo.count > 1)
+        --dllInfo.count;
+    else if (dllInfo.count == 1)
+    {
+        --dllInfo.count;
+        VirtualFree(dllInfo.base, 0, MEM_RELEASE);
+    }
+    else
+        dllInfo.count = 0;
 }
 
-void PEFile::initPEInfo(ifstream &dllStream)
+void Loader::initPEInfo(MoudleInfo &dllInfo, istream &dllStream)
 {
     dllStream.seekg(0);
-    dllStream.read(reinterpret_cast<char *>(&(this->info.DosHeader)), sizeof(this->info.DosHeader)); //read dosHeader
-    dllStream.seekg(this->info.DosHeader.e_lfanew);                                                  //locate ntHeader
-    dllStream.read((char *)(&(this->info.NtHeaders)), sizeof(this->info.NtHeaders));                 // read ntHeader
+    dllStream.read(reinterpret_cast<char *>(&(dllInfo.peInfo.DosHeader)), sizeof(dllInfo.peInfo.DosHeader)); //read dosHeader
+    dllStream.seekg(dllInfo.peInfo.DosHeader.e_lfanew);                                                      //locate ntHeader
+    dllStream.read((char *)(&(dllInfo.peInfo.NtHeaders)), sizeof(dllInfo.peInfo.NtHeaders)); // read ntHeader
 
     IMAGE_SECTION_HEADER sectionHeader;
-    for (int i = 0; i < this->info.NtHeaders.FileHeader.NumberOfSections; ++i) // read sectionHeaders
+    for (int i = 0; i < dllInfo.peInfo.NtHeaders.FileHeader.NumberOfSections; ++i) // read sectionHeaders
     {
         dllStream.read(reinterpret_cast<char *>(&sectionHeader), sizeof(sectionHeader));
-        this->info.SectionHeaders.push_back(sectionHeader);
+        dllInfo.peInfo.SectionHeaders.push_back(sectionHeader);
     }
 
     return;
 }
 
-void PEFile::copyDllToMem(ifstream &pe)
+void Loader::copyDllToMem(MoudleInfo &dllInfo, istream &pe)
 {
 
     // copy sections to mem
     char buf[BUFFER_SIZE];
     //content before sections
-    uint32_t remainSize = info.SectionHeaders[0].PointerToRawData;
-    void *curPos = reinterpret_cast<void *>(RVAToVA(0));
+    uint32_t remainSize = dllInfo.peInfo.SectionHeaders[0].PointerToRawData;
+    void *curPos = reinterpret_cast<void *>(RVAToVA(0, dllInfo));
     pe.seekg(ios::beg);
     while (remainSize > BUFFER_SIZE)
     {
@@ -66,10 +108,10 @@ void PEFile::copyDllToMem(ifstream &pe)
     pe.read(buf, remainSize);
     memcpy(curPos, buf, remainSize);
 
-    for (auto &sectionHeader : this->info.SectionHeaders)
+    for (auto &sectionHeader : dllInfo.peInfo.SectionHeaders)
     {
         remainSize = sectionHeader.SizeOfRawData;
-        curPos = reinterpret_cast<void *>(RVAToVA(sectionHeader.VirtualAddress));
+        curPos = reinterpret_cast<void *>(RVAToVA(sectionHeader.VirtualAddress, dllInfo));
         pe.seekg(sectionHeader.PointerToRawData);
 
         while (remainSize > BUFFER_SIZE)
@@ -85,10 +127,10 @@ void PEFile::copyDllToMem(ifstream &pe)
     return;
 }
 
-void PEFile::relocate()
+void Loader::relocate(MoudleInfo &dllInfo)
 {
-    void *pRelocateTable = reinterpret_cast<void *>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress));
-    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(pRelocateTable) + this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size);
+    void *pRelocateTable = reinterpret_cast<void *>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress, dllInfo));
+    void *pRelocateTableEnd = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(pRelocateTable) + dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size);
 
     void *curTablePos = pRelocateTable;
     while (curTablePos < pRelocateTableEnd)
@@ -101,19 +143,19 @@ void PEFile::relocate()
         {
             if ((*offset & 0xf000) != 0x3000) //高四位为0x0011时有效，否则为占位项
                 continue;
-            void **pPData = reinterpret_cast<void **>(RVAToVA(rel->VirtualAddress) + ((*offset) & 0x0fff));
-            *pPData = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(*pPData) + reinterpret_cast<uint32_t>(this->base) - this->info.NtHeaders.OptionalHeader.ImageBase);
+            void **pPData = reinterpret_cast<void **>(RVAToVA(rel->VirtualAddress, dllInfo) + ((*offset) & 0x0fff));
+            *pPData = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(*pPData) + reinterpret_cast<uint32_t>(dllInfo.base) - dllInfo.peInfo.NtHeaders.OptionalHeader.ImageBase);
         }
         curTablePos = reinterpret_cast<void *>(reinterpret_cast<uint32_t>(curTablePos) + rel->SizeOfBlock);
     }
 }
 
-void *PEFile::getFuntionByName(const string &name)
+void *Loader::getFuntionByName(MoudleInfo &dllInfo, const string &name)
 {
-    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress));
-    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions));
-    static uint32_t *namePointerTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfNames));
-    static uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(RVAToVA(pExDir->AddressOfNameOrdinals));
+    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress, dllInfo));
+    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions, dllInfo));
+    static uint32_t *namePointerTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfNames, dllInfo));
+    static uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(RVAToVA(pExDir->AddressOfNameOrdinals, dllInfo));
 
     //get ordinal
     auto namePointer = namePointerTable;
@@ -122,7 +164,7 @@ void *PEFile::getFuntionByName(const string &name)
     //搜索导出名字表中是否存在对应名字的函数
     for (; count < pExDir->NumberOfNames; ++count)
     {
-        if (strcmp(name.c_str(), reinterpret_cast<char *>(RVAToVA(*namePointer))) == 0)
+        if (strcmp(name.c_str(), reinterpret_cast<char *>(RVAToVA(*namePointer, dllInfo))) == 0)
             break;
         ++namePointer;
     }
@@ -130,22 +172,22 @@ void *PEFile::getFuntionByName(const string &name)
         return nullptr;
 
     auto rva = (addressTable[ordinalTable[count]]); //序号表和名字表是一一对应的， 序号表中存放的内容为该函数在地址表中索引
-    return reinterpret_cast<void *>(RVAToVA(rva));
+    return reinterpret_cast<void *>(RVAToVA(rva, dllInfo));
 }
-void *PEFile::getFuntionByOrd(unsigned int ord)
+void *Loader::getFuntionByOrd(MoudleInfo &dllInfo, unsigned int ord)
 {
-    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress));
-    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions));
+    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress, dllInfo));
+    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions, dllInfo));
 
     ord -= pExDir->Base; // ordinal table中存储的是函数在 address table中的索引
-    return reinterpret_cast<void *>(RVAToVA(addressTable[ord]));
+    return reinterpret_cast<void *>(RVAToVA(addressTable[ord], dllInfo));
 }
 
-void PEFile::fixImportTable()
+void Loader::fixImportTable(MoudleInfo &dllInfo)
 {
     // FIXME: 未处理绑定导入表
-    PIMAGE_IMPORT_DESCRIPTOR pImDes = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress));
-    // PIMAGE_BOUND_IMPORT_DESCRIPTOR pBImDes = reinterpret_cast<PIMAGE_BOUND_IMPORT_DESCRIPTOR>(RVAToVA(this->info.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT].VirtualAddress));
+    PIMAGE_IMPORT_DESCRIPTOR pImDes = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress, dllInfo));
+    // PIMAGE_BOUND_IMPORT_DESCRIPTOR pBImDes = reinterpret_cast<PIMAGE_BOUND_IMPORT_DESCRIPTOR>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT].VirtualAddress, dllInfo));
     while (pImDes->Characteristics != 0) // 0 for terminating null import descriptor
     {
         // switch (pImDes->TimeDateStamp)
@@ -153,10 +195,10 @@ void PEFile::fixImportTable()
         // 未绑定导入
         // case 0:
         // {
-        char *moudleName = reinterpret_cast<char *>(RVAToVA(pImDes->Name));
+        char *moudleName = reinterpret_cast<char *>(RVAToVA(pImDes->Name, dllInfo));
         auto hMoudle = LoadLibrary(moudleName);
-        void **pPAddressTable = reinterpret_cast<void **>(RVAToVA(pImDes->FirstThunk));
-        char **pPNameTable = reinterpret_cast<char **>(RVAToVA(pImDes->OriginalFirstThunk));
+        void **pPAddressTable = reinterpret_cast<void **>(RVAToVA(pImDes->FirstThunk, dllInfo));
+        char **pPNameTable = reinterpret_cast<char **>(RVAToVA(pImDes->OriginalFirstThunk, dllInfo));
 
         while (*pPNameTable != nullptr) // end of imports
         {
@@ -166,10 +208,10 @@ void PEFile::fixImportTable()
                 //TODO
                 continue;
             }
-            uint16_t *pHint = reinterpret_cast<uint16_t *>(RVAToVA(reinterpret_cast<uint32_t>(*pPNameTable)));
+            uint16_t *pHint = reinterpret_cast<uint16_t *>(RVAToVA(reinterpret_cast<uint32_t>(*pPNameTable), dllInfo));
             char *pFunctionName = reinterpret_cast<char *>(pHint + 1);
             auto fun = GetProcAddress(hMoudle, pFunctionName);
-            if(reinterpret_cast<uint32_t>(fun) == reinterpret_cast<uint32_t>(*pPAddressTable))
+            if (reinterpret_cast<uint32_t>(fun) == reinterpret_cast<uint32_t>(*pPAddressTable))
                 break;
             *pPAddressTable = reinterpret_cast<void *>(fun);
             ++pPAddressTable;
@@ -223,15 +265,36 @@ void dlltest()
     return;
 }
 
+void encrypt()
+{
+
+    Encrypter cp;
+    vector<fs::path> fileNames;
+    fileNames.push_back("1.dll");
+    fileNames.push_back("2.dll");
+    cp.encryptFiles(fileNames, "output");
+}
+
 int main()
 {
     // dlltest();
-    PEFile dll;
-    dll.loadFromFile("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
+    encrypt();
+    Loader loader;
+    auto path = fs::current_path() / "output";
+    loader.loadEncryptedDlls(path);
+
+    auto moudleInfo1 = loader.dllMap["1.dll"];
+    auto moudleInfo2 = loader.dllMap["2.dll"];
+
     typedef const char *(*FUN)(int a, int b);
-    FUN fun = reinterpret_cast<FUN>(dll.getFuntionByName("msg"));
-    //FUN fun = reinterpret_cast<FUN>(dll.getFuntionByOrd(4));
-    if (fun != nullptr)
-        cout << fun(22, 33) << endl;
-    dll.close();
+    FUN fun1 = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo1, "msg"));
+    FUN fun2 = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo2, "msg"));
+
+    if (fun1 != nullptr)
+        cout << fun1(22, 33) << endl;
+    if (fun2 != nullptr)
+        cout << fun2(22, 33) << endl;
+
+    loader.unloadMoudle(moudleInfo1);
+    loader.unloadMoudle(moudleInfo2);
 }

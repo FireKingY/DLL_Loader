@@ -1,4 +1,3 @@
-#include <filesystem>
 #include <cstring>
 #include "Encrypter.h"
 #include "def.h"
@@ -7,7 +6,8 @@ DecryptedFile::DecryptedFile(char *fileName, streambuf *pStBuf) : fileName(strin
 DecryptedFile::DecryptedFile() : pStBuf(nullptr) {}
 DecryptedFile::~DecryptedFile()
 {
-    delete pStBuf;
+    //FIXME: 内存泄漏警告
+    // delete pStBuf;
 }
 
 void Encrypter::encryptFiles(vector<fs::path> &filePaths, const string &outputFileName)
@@ -52,15 +52,16 @@ vector<DecryptedFile> Encrypter::decryptFile(const fs::path &inputFilePath)
     ostream os(nullptr);
     vector<DecryptedFile> files;
 
-    ifs.open(inputFilePath);
+    ifs.open(inputFilePath, ios::binary);
     bool end = false;
     while (!end)
     {
-        os.rdbuf(new stringbuf);
+        ostream os(nullptr);
         char fileName[100];
         char *cur = fileName;
         while (true)
         {
+            os.rdbuf(new stringbuf);
             ifs.read(cur, sizeof(char));
             *(cur + 1) = 0;
             if (*cur == 0)
@@ -84,28 +85,33 @@ vector<DecryptedFile> Encrypter::decryptFile(const fs::path &inputFilePath)
         {
             ifs.read(buf, BUFFER_SIZE);
             os.write(buf, BUFFER_SIZE);
+            fileSize -= BUFFER_SIZE;
         }
         ifs.read(buf, fileSize);
         os.write(buf, fileSize);
-        files.push_back(DecryptedFile(fileName, os.rdbuf()));
+        auto ps = os.rdbuf();
+        auto tmp = DecryptedFile(fileName, ps);
+        files.push_back(tmp);
     }
     ifs.close();
     return files;
 }
 
-int main()
-{
-    Encrypter cp;
-    vector<fs::path> fileNames;
-    fileNames.push_back("test1.t");
-    fileNames.push_back("test2.t");
-    cp.encryptFiles(fileNames, "output");
-    auto files = cp.decryptFile("output");
-    for (auto &file : files)
-    {
-        istream is(file.pStBuf);
-        char buf[100] = {0};
-        is.read(buf, 99);
-        cout << buf << endl;
-    }
-}
+// int main()
+// {
+//     Encrypter cp;
+// //     vector<fs::path> fileNames;
+// //     fileNames.push_back("1.dll");
+// //     fileNames.push_back("2.dll");
+// //     cp.encryptFiles(fileNames, "output");
+
+//     auto files = cp.decryptFile("output");
+//     istream is(nullptr);
+//     for (auto &file : files)
+//     {
+//         is.rdbuf(file.pStBuf);
+//         char buf[100] = {0};
+//         is.read(buf, 99);
+//         cout << buf << endl;
+//     }
+// }
