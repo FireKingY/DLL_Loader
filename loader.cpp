@@ -1,13 +1,44 @@
 #include <fstream>
 #include <cstring>
+#include <locale>
+#include <algorithm>
 #include "loader.h"
 #include "def.h"
 using namespace std;
+
+MoudleInfo::MoudleInfo() : count(0), base(nullptr), pStBuf(nullptr) {}
+
+MoudleInfo *Loader::loadByName(const string &name)
+{
+    auto lowerName = name;
+    transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+    auto &dllInfo = dllMap[lowerName];
+    if (dllInfo.count >= 1)
+    {
+        ++dllInfo.count;
+        return &dllInfo;
+    }
+    else if (dllInfo.pStBuf != nullptr)
+    {
+        istream dllStream(dllInfo.pStBuf);
+        loadfromstream(dllInfo, dllStream);
+        dllInfo.count = 1;
+        return &dllInfo;
+    }
+    else
+        return nullptr;
+}
 
 void Loader::loadEncryptedDlls(fs::path &filePath)
 {
     auto dlls = encrypter.decryptFile(filePath);
     // istream dllStream(nullptr);
+    for (auto &dll : dlls)
+    {
+        transform(dll.fileName.begin(), dll.fileName.end(), dll.fileName.begin(), ::tolower);
+        dllMap[dll.fileName].pStBuf = dll.pStBuf;
+    }
+
     for (auto &dll : dlls)
     {
         auto &dllInfo = dllMap[dll.fileName];
@@ -190,64 +221,64 @@ void Loader::fixImportTable(MoudleInfo &dllInfo)
     // PIMAGE_BOUND_IMPORT_DESCRIPTOR pBImDes = reinterpret_cast<PIMAGE_BOUND_IMPORT_DESCRIPTOR>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT].VirtualAddress, dllInfo));
     while (pImDes->Characteristics != 0) // 0 for terminating null import descriptor
     {
-        // switch (pImDes->TimeDateStamp)
-        // {
-        // 未绑定导入
-        // case 0:
-        // {
-        char *moudleName = reinterpret_cast<char *>(RVAToVA(pImDes->Name, dllInfo));
-        auto hMoudle = LoadLibrary(moudleName);
         void **pPAddressTable = reinterpret_cast<void **>(RVAToVA(pImDes->FirstThunk, dllInfo));
         char **pPNameTable = reinterpret_cast<char **>(RVAToVA(pImDes->OriginalFirstThunk, dllInfo));
-
         void *fun = nullptr;
-        while (*pPNameTable != nullptr) // end of imports
+
+        char *moudleName = reinterpret_cast<char *>(RVAToVA(pImDes->Name, dllInfo));
+        string str_moudleName(moudleName);
+
+        auto pDllInfo = loadByName(str_moudleName);
+        if (pDllInfo != nullptr)
         {
-            if (IMAGE_SNAP_BY_ORDINAL32(reinterpret_cast<uint32_t>(*pPNameTable)))
+            while (*pPNameTable != nullptr) // end of imports
             {
-                // 按序号导入
-                //TODO
-                fun = (void*)GetProcAddress(hMoudle, (char*)((uint32_t)(*pPNameTable) & 0xffff));
+                if (IMAGE_SNAP_BY_ORDINAL32(reinterpret_cast<uint32_t>(*pPNameTable)))
+                {
+                    // 按序号导入
+                    fun = getFuntionByOrd(*pDllInfo, (uint32_t)(*pPNameTable) & 0xffff);
+                }
+                else
+                {
+                    uint16_t *pHint = reinterpret_cast<uint16_t *>(RVAToVA(reinterpret_cast<uint32_t>(*pPNameTable), dllInfo));
+                    char *pFunctionName = reinterpret_cast<char *>(pHint + 1);
+                    fun = getFuntionByName(*pDllInfo, pFunctionName);
+                }
+                if (reinterpret_cast<uint32_t>(fun) == reinterpret_cast<uint32_t>(*pPAddressTable))
+                    break;
+                *pPAddressTable = reinterpret_cast<void *>(fun);
+                ++pPAddressTable;
+                ++pPNameTable;
             }
-            else
-            {
-                uint16_t *pHint = reinterpret_cast<uint16_t *>(RVAToVA(reinterpret_cast<uint32_t>(*pPNameTable), dllInfo));
-                char *pFunctionName = reinterpret_cast<char *>(pHint + 1);
-                fun = (void *)GetProcAddress(hMoudle, pFunctionName);
-            }
-            if (reinterpret_cast<uint32_t>(fun) == reinterpret_cast<uint32_t>(*pPAddressTable))
-                break;
-            *pPAddressTable = reinterpret_cast<void *>(fun);
-            ++pPAddressTable;
-            ++pPNameTable;
         }
+        else
+        {
+            auto hMoudle = LoadLibrary(moudleName);
 
-        //     break;
-        // }
-
-        // 绑定导入 IAT内为函数绝对地址
-        // case 0xffffffff:
-        // {
-        //     // bool needFix = false;
-        //     //检查timestamp
-
-        //     break;
-        // }
-        // default:
-        //     break;
-        // }
+            while (*pPNameTable != nullptr) // end of imports
+            {
+                if (IMAGE_SNAP_BY_ORDINAL32(reinterpret_cast<uint32_t>(*pPNameTable)))
+                {
+                    // 按序号导入
+                    //TODO
+                    fun = (void *)GetProcAddress(hMoudle, (char *)((uint32_t)(*pPNameTable) & 0xffff));
+                }
+                else
+                {
+                    uint16_t *pHint = reinterpret_cast<uint16_t *>(RVAToVA(reinterpret_cast<uint32_t>(*pPNameTable), dllInfo));
+                    char *pFunctionName = reinterpret_cast<char *>(pHint + 1);
+                    fun = (void *)GetProcAddress(hMoudle, pFunctionName);
+                }
+                if (reinterpret_cast<uint32_t>(fun) == reinterpret_cast<uint32_t>(*pPAddressTable))
+                    break;
+                *pPAddressTable = reinterpret_cast<void *>(fun);
+                ++pPAddressTable;
+                ++pPNameTable;
+            }
+        }
         ++pImDes;
     }
 
-    // while (!(pBImDes->TimeDateStamp == 0 && pBImDes->OffsetModuleName == 0 && pBImDes->NumberOfModuleForwarderRefs == 0))
-    // {
-    //    // PIMAGE_BOUND_FORWARDER_REF pImBFwR = reinterpret_cast<PIMAGE_BOUND_FORWARDER_REF>(pBImDes);
-    //     // fix if stamp does not equal
-    //     if (pBImDes->TimeDateStamp != info.NtHeaders.FileHeader.TimeDateStamp)
-    //     {
-    //         cout << "need fix" << endl;
-    //     }
-    // }
 }
 
 void dlltest()
@@ -274,8 +305,9 @@ void encrypt()
 
     Encrypter cp;
     vector<fs::path> fileNames;
-    // fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
     fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\test2\\Release\\test2.dll");
+    fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
+    
     cp.encryptFiles(fileNames, "output");
 }
 
