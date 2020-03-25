@@ -30,11 +30,17 @@ void SimpleCryptProtocol::encrypt(const fs::path &filePath, ofstream &ofs)
 
     ifstream ifs;
     ifs.open(filePath, ios_base::binary);
+
     //write filename
     auto fileName = filePath.filename().string();
-    char tmp = 0;
+    char tmp = 0^magicNum;
+    for(auto& c: fileName)
+        c ^= magicNum;
+
     ofs.write(fileName.c_str(), fileName.length()*sizeof(char));
     ofs.write(&tmp, sizeof(char)); // end of filename
+
+
     //write filesize
     auto fileSize = (uint64_t)fs::file_size(filePath);
     ofs.write((char *)(&fileSize), sizeof(fileSize));
@@ -73,6 +79,8 @@ DecryptedFile SimpleCryptProtocol::decrypt(ifstream &ifs)
     {
         os.rdbuf(new stringbuf);
         ifs.read(cur, sizeof(char));
+        *cur ^= magicNum;
+
         *(cur + 1) = 0;
         if (*cur == 0)
             break;
