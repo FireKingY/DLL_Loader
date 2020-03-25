@@ -1,8 +1,6 @@
-#include <windows.h>
-#include <vector>
-#include <iostream>
+#pragma once
+#include "def.h"
 #include "Encrypter.h"
-#include <unordered_map>
 using namespace std;
 
 
@@ -25,6 +23,7 @@ struct MoudleInfo
 class Loader
 {
 public:
+    Loader(Encrypter encrypter);
     unordered_map<string, MoudleInfo> dllMap;
     Encrypter encrypter;
 
@@ -34,7 +33,7 @@ public:
     void* getFuntionByName(MoudleInfo& dllInfo, const string& name);
     void* getFuntionByOrd(MoudleInfo& dllInfo, unsigned int ord);
     void loadDecryptedDlls(vector<DecryptedFile>& dlls);
-    void loadEncryptedDlls(fs::path& filePath);
+    void loadEncryptedDlls(const fs::path& filePath);
     MoudleInfo* loadByName(const string& name);
 
 private:

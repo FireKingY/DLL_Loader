@@ -1,9 +1,5 @@
-#include <vector>
-#include <string>
-#include <fstream>
-#include <sstream>
-#include <iostream>
-#include <filesystem>
+#pragma once
+#include "def.h"
 using namespace std;
 
 namespace fs = std::filesystem;
@@ -11,15 +7,26 @@ namespace fs = std::filesystem;
 struct DecryptedFile
 {
     string fileName;
-    streambuf* pStBuf;
-    DecryptedFile(char* fileName, streambuf* pStBuf);
+    streambuf *pStBuf;
+    DecryptedFile(char *fileName, streambuf *pStBuf);
     DecryptedFile();
     ~DecryptedFile();
 };
 
+class CryptProtocol
+{
+public:
+    virtual void encrypt(const fs::path &filePath, ofstream &ofs);
+    virtual DecryptedFile decrypt(ifstream &ifs);
+};
+
+
 class Encrypter
 {
 public:
-    void encryptFiles(vector<fs::path> &inputFileNames, const string &outputFileName);
+    Encrypter(CryptProtocol* prot);
+    void encryptFiles(vector<fs::path> &inputFileNames, const fs::path &outputFilePath);
     vector<DecryptedFile> decryptFile(const fs::path &inputFileName);
+
+    CryptProtocol* prot;
 };
