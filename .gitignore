@@ -8,6 +8,5 @@ x64/*
 *.sln
 *.vcxproj*
 *.out
-test.cpp
-output
+output/*
 *.t
