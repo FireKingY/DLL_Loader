@@ -181,10 +181,10 @@ void Loader::relocate(MoudleInfo &dllInfo)
 
 void *Loader::getFuntionByName(MoudleInfo &dllInfo, const string &name)
 {
-    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress, dllInfo));
-    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions, dllInfo));
-    static uint32_t *namePointerTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfNames, dllInfo));
-    static uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(RVAToVA(pExDir->AddressOfNameOrdinals, dllInfo));
+    PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress, dllInfo));
+    uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions, dllInfo));
+    uint32_t *namePointerTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfNames, dllInfo));
+    uint16_t *ordinalTable = reinterpret_cast<uint16_t *>(RVAToVA(pExDir->AddressOfNameOrdinals, dllInfo));
 
     //get ordinal
     auto namePointer = namePointerTable;
@@ -205,8 +205,8 @@ void *Loader::getFuntionByName(MoudleInfo &dllInfo, const string &name)
 }
 void *Loader::getFuntionByOrd(MoudleInfo &dllInfo, unsigned int ord)
 {
-    static PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress, dllInfo));
-    static uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions, dllInfo));
+    PIMAGE_EXPORT_DIRECTORY pExDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(RVAToVA(dllInfo.peInfo.NtHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress, dllInfo));
+    uint32_t *addressTable = reinterpret_cast<uint32_t *>(RVAToVA(pExDir->AddressOfFunctions, dllInfo));
 
     ord -= pExDir->Base; // ordinal table中存储的是函数在 address table中的索引
     return reinterpret_cast<void *>(RVAToVA(addressTable[ord], dllInfo));
