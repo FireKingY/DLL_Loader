@@ -1,6 +1,7 @@
 #include "Encrypter.h"
 
-DecryptedFile::DecryptedFile(char *fileName, streambuf *pStBuf) : fileName(string(fileName)), pStBuf(pStBuf) {}
+DecryptedFile::DecryptedFile(char *fileName, streambuf *pStBuf):fileName(string(fileName)), pStBuf(shared_ptr<streambuf>(pStBuf)){}
+DecryptedFile::DecryptedFile(char *fileName, shared_ptr<streambuf> pStBuf) : fileName(string(fileName)), pStBuf(pStBuf) {}
 DecryptedFile::DecryptedFile() : pStBuf(nullptr) {}
 DecryptedFile::~DecryptedFile()
 {
@@ -71,16 +72,11 @@ DecryptedFile CryptProtocol::decrypt(ifstream &ifs)
     return DecryptedFile(fileName, ps);
 }
 
-Encrypter::Encrypter(CryptProtocol* prot) : prot(prot) {}
+Encrypter::Encrypter(CryptProtocol *prot) : prot(prot) {}
 
 void Encrypter::encryptFiles(vector<fs::path> &filePaths, const fs::path &outputFilePath = "encrypted")
 {
-    // if(outputFileName == ".")
-    // {
-    //     outputFileName == "encrypted_";
-    //     for(auto& path:filePaths)
-    //         outputFileName += path.filename + "&";
-    // }
+
     ofstream ofs;
     ifstream is;
 
@@ -101,7 +97,7 @@ vector<DecryptedFile> Encrypter::decryptFile(const fs::path &inputFilePath)
     while (true)
     {
         auto file = prot->decrypt(ifs);
-        if(file.pStBuf == nullptr)
+        if (file.pStBuf == nullptr)
             break;
         files.push_back(file);
     }

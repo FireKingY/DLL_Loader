@@ -16,7 +16,7 @@ MoudleInfo *Loader::loadByName(const string &name)
     }
     else if (dllInfo.pStBuf != nullptr)
     {
-        istream dllStream(dllInfo.pStBuf);
+        istream dllStream(dllInfo.pStBuf.get());
         loadfromstream(dllInfo, dllStream);
         dllInfo.count = 1;
         return &dllInfo;
@@ -47,7 +47,7 @@ void Loader::loadEncryptedDlls(const fs::path &filePath)
         }
         else
             dllInfo.count = 1;
-        istream dllStream(dll.pStBuf);
+        istream dllStream(dll.pStBuf.get());
         loadfromstream(dllInfo, dllStream);
     }
 }
@@ -66,6 +66,8 @@ void Loader::loadfromstream(MoudleInfo &dllInfo, istream &dllStream)
     copyDllToMem(dllInfo, dllStream);
     relocate(dllInfo);
     fixImportTable(dllInfo);
+    // 加载已完成 不再需要流buf
+    dllInfo.pStBuf.reset();
 }
 void Loader::loadFromFile(const fs::path &filePath)
 {

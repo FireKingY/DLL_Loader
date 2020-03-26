@@ -7,7 +7,8 @@ namespace fs = std::filesystem;
 struct DecryptedFile
 {
     string fileName;
-    streambuf *pStBuf;
+    shared_ptr<streambuf> pStBuf;
+    DecryptedFile(char *fileName, shared_ptr<streambuf> pStBuf);
     DecryptedFile(char *fileName, streambuf *pStBuf);
     DecryptedFile();
     ~DecryptedFile();
