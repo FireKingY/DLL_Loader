@@ -5,7 +5,7 @@ DecryptedFile::DecryptedFile(char *fileName, shared_ptr<streambuf> pStBuf) : fil
 DecryptedFile::DecryptedFile() : pStBuf(nullptr) {}
 DecryptedFile::~DecryptedFile()
 {
-    //FIXME: 内存泄漏警告
+    //使用共享指针无需手动处理
     // delete pStBuf;
 }
 
