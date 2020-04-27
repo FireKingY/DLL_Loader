@@ -18,7 +18,7 @@ class CryptProtocol
 {
 public:
     virtual void encrypt(const fs::path &filePath, ofstream &ofs);
-    virtual DecryptedFile decrypt(ifstream &ifs);
+    virtual DecryptedFile decrypt(istream &is);
 };
 
 
@@ -28,6 +28,7 @@ public:
     Encrypter(CryptProtocol* prot);
     void encryptFiles(vector<fs::path> &inputFileNames, const fs::path &outputFilePath);
     vector<DecryptedFile> decryptFile(const fs::path &inputFileName);
+    vector<DecryptedFile> decryptFile(istream &is);
 
     CryptProtocol* prot;
 };

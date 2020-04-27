@@ -33,6 +33,7 @@ public:
     void *getFuntionByOrd(MoudleInfo &dllInfo, unsigned int ord);
     void loadDecryptedDlls(vector<DecryptedFile> &dlls);
     void loadEncryptedDlls(const fs::path &filePath);
+    void loadEncryptedDlls(istream& is);
     MoudleInfo *loadByName(const string &name);
 
 private:

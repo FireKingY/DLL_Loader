@@ -1,6 +1,6 @@
 #include "Encrypter.h"
 
-DecryptedFile::DecryptedFile(char *fileName, streambuf *pStBuf):fileName(string(fileName)), pStBuf(shared_ptr<streambuf>(pStBuf)){}
+DecryptedFile::DecryptedFile(char *fileName, streambuf *pStBuf) : fileName(string(fileName)), pStBuf(shared_ptr<streambuf>(pStBuf)) {}
 DecryptedFile::DecryptedFile(char *fileName, shared_ptr<streambuf> pStBuf) : fileName(string(fileName)), pStBuf(pStBuf) {}
 DecryptedFile::DecryptedFile() : pStBuf(nullptr) {}
 DecryptedFile::~DecryptedFile()
@@ -34,7 +34,7 @@ void CryptProtocol::encrypt(const fs::path &filePath, ofstream &ofs)
     ifs.close();
 }
 
-DecryptedFile CryptProtocol::decrypt(ifstream &ifs)
+DecryptedFile CryptProtocol::decrypt(istream &is)
 {
 
     ostream os(nullptr);
@@ -43,11 +43,11 @@ DecryptedFile CryptProtocol::decrypt(ifstream &ifs)
     while (true)
     {
         os.rdbuf(new stringbuf);
-        ifs.read(cur, sizeof(char));
+        is.read(cur, sizeof(char));
         *(cur + 1) = 0;
         if (*cur == 0)
             break;
-        if (ifs.eof())
+        if (is.eof())
         {
             cur[0] = 0;
             return DecryptedFile(fileName, nullptr);
@@ -56,16 +56,16 @@ DecryptedFile CryptProtocol::decrypt(ifstream &ifs)
     }
 
     uint64_t fileSize;
-    ifs.read((char *)&fileSize, sizeof(fileSize));
+    is.read((char *)&fileSize, sizeof(fileSize));
 
     char buf[BUFFER_SIZE];
     while (fileSize > BUFFER_SIZE)
     {
-        ifs.read(buf, BUFFER_SIZE);
+        is.read(buf, BUFFER_SIZE);
         os.write(buf, BUFFER_SIZE);
         fileSize -= BUFFER_SIZE;
     }
-    ifs.read(buf, fileSize);
+    is.read(buf, fileSize);
     os.write(buf, fileSize);
     auto ps = os.rdbuf();
     os.rdbuf(nullptr);
@@ -90,17 +90,24 @@ void Encrypter::encryptFiles(vector<fs::path> &filePaths, const fs::path &output
 vector<DecryptedFile> Encrypter::decryptFile(const fs::path &inputFilePath)
 {
     ifstream ifs;
+
+    ifs.open(inputFilePath, ios::binary);
+    auto files = decryptFile(ifs);
+    ifs.close();
+    return files;
+}
+
+vector<DecryptedFile> Encrypter::decryptFile(istream &is)
+{
     ostream os(nullptr);
     vector<DecryptedFile> files;
 
-    ifs.open(inputFilePath, ios::binary);
     while (true)
     {
-        auto file = prot->decrypt(ifs);
+        auto file = prot->decrypt(is);
         if (file.pStBuf == nullptr)
             break;
         files.push_back(file);
     }
-    ifs.close();
     return files;
 }

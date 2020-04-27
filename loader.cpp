@@ -52,6 +52,32 @@ void Loader::loadEncryptedDlls(const fs::path &filePath)
     }
 }
 
+void Loader::loadEncryptedDlls(istream& is)
+{
+    //FIXME: 代码重用
+    auto dlls = encrypter.decryptFile(is);
+    // istream dllStream(nullptr);
+    for (auto &dll : dlls)
+    {
+        transform(dll.fileName.begin(), dll.fileName.end(), dll.fileName.begin(), ::tolower);
+        dllMap[dll.fileName].pStBuf = dll.pStBuf;
+    }
+
+    for (auto &dll : dlls)
+    {
+        auto &dllInfo = dllMap[dll.fileName];
+        if (dllInfo.count > 0)
+        {
+            ++dllInfo.count;
+            continue;
+        }
+        else
+            dllInfo.count = 1;
+        istream dllStream(dll.pStBuf.get());
+        loadfromstream(dllInfo, dllStream);
+    }
+}
+
 DWORD Loader::RVAToVA(DWORD RVA, MoudleInfo &dllInfo)
 {
     return RVA + reinterpret_cast<uint32_t>(dllInfo.base);

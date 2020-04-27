@@ -68,9 +68,9 @@ void SimpleCryptProtocol::encrypt(const fs::path &filePath, ofstream &ofs)
     ifs.close();
 }
 
-DecryptedFile SimpleCryptProtocol::decrypt(ifstream &ifs)
+DecryptedFile SimpleCryptProtocol::decrypt(istream &is)
 {
-    ifs.read(&magicNum, sizeof(magicNum));
+    is.read(&magicNum, sizeof(magicNum));
 
     ostream os(nullptr);
     char fileName[100];
@@ -78,13 +78,13 @@ DecryptedFile SimpleCryptProtocol::decrypt(ifstream &ifs)
     while (true)
     {
         os.rdbuf(new stringbuf);
-        ifs.read(cur, sizeof(char));
+        is.read(cur, sizeof(char));
         *cur ^= magicNum;
 
         *(cur + 1) = 0;
         if (*cur == 0)
             break;
-        if (ifs.eof())
+        if (is.eof())
         {
             cur[0] = 0;
             return DecryptedFile(fileName, nullptr);
@@ -93,12 +93,12 @@ DecryptedFile SimpleCryptProtocol::decrypt(ifstream &ifs)
     }
 
     uint64_t fileSize;
-    ifs.read((char *)&fileSize, sizeof(fileSize));
+    is.read((char *)&fileSize, sizeof(fileSize));
 
     char *buf = new char[fenceSize];
     while (fileSize >= (unsigned int)fenceSize)
     {
-        ifs.read(buf, fenceSize);
+        is.read(buf, fenceSize);
         fileSize -= fenceSize;
 
         //解密
@@ -109,7 +109,7 @@ DecryptedFile SimpleCryptProtocol::decrypt(ifstream &ifs)
 
         os.write(buf, fenceSize);
     }
-    ifs.read(buf, fileSize);
+    is.read(buf, fileSize);
     os.write(buf, fileSize);
     auto ps = os.rdbuf();
     os.rdbuf(nullptr);

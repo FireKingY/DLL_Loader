@@ -1,6 +1,7 @@
 Debug/*
 Release/*
 x64/*
+*/.vscode/*
 .vscode/*
 .vs/*
 *.exe
@@ -10,3 +11,6 @@ x64/*
 *.out
 output/*
 *.t
+info.txt
+*/target
+*/reve_target
