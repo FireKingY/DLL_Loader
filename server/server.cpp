@@ -35,19 +35,30 @@ int main()
         socklen_t clnt_addr_size = sizeof(clnt_addr);
         int clnt_sock = accept(serv_sock, (struct sockaddr *)&clnt_addr, &clnt_addr_size);
 
+        cout << inet_ntoa(clnt_addr.sin_addr) << endl;
+
         char buffer[BUFF_SIZE] = {0};
         // open file
-        string filename = "../output/encrypted";
-        if (!(experimental::filesystem::exists(filename)))
+        string filename = "InfoReader.dll";
+        string filePath = "./" + filename;
+        if (!(experimental::filesystem::exists(filePath)))
         {
             cout << "file does not exist" << endl;
+            //关闭输出流，阻塞，等待连接关闭
+            shutdown(clnt_sock, SHUT_WR);
+            read(clnt_sock, buffer, BUFF_SIZE);
+            close(clnt_sock);
+            close(serv_sock);
+            return -1;
         }
         else
         {
             cout << "file exists" << endl;
             ifstream file;
-            file.open(filename, ios_base::binary);
-
+            file.open(filePath, ios_base::binary);
+            write(clnt_sock, filename.c_str(), filename.length());
+            char tmp = 0x03;
+            write(clnt_sock, &tmp, 1); //结束标志
             while(true)
             {
                 file.read(buffer, BUFF_SIZE);

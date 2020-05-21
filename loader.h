@@ -3,43 +3,31 @@
 #include "Encrypter.h"
 using namespace std;
 
-struct PE_INFO32
-{
-    IMAGE_DOS_HEADER DosHeader;
-    IMAGE_NT_HEADERS32 NtHeaders;
-    vector<IMAGE_SECTION_HEADER> SectionHeaders;
-};
-
-struct MoudleInfo
-{
-    uint32_t count;
-    void *base;
-    PE_INFO32 peInfo;
-    shared_ptr<streambuf> pStBuf; // 当dll被解密但尚未被加载时有效，用于在被依赖时定位用
-    MoudleInfo();
-};
-
 class Loader
 {
 public:
-    Loader(Encrypter encrypter);
-    unordered_map<string, MoudleInfo> dllMap;
     Encrypter encrypter;
 
-    void loadFromFile(const fs::path &filePath);
-    void unloadMoudle(MoudleInfo &dllInfo);
-    DWORD RVAToVA(DWORD RVA, MoudleInfo &dllInfo);
-    void *getFuntionByName(MoudleInfo &dllInfo, const string &name);
-    void *getFuntionByOrd(MoudleInfo &dllInfo, unsigned int ord);
-    void loadDecryptedDlls(vector<DecryptedFile> &dlls);
-    void loadEncryptedDlls(const fs::path &filePath);
-    void loadEncryptedDlls(istream& is);
-    MoudleInfo *loadByName(const string &name);
+
+    Loader(Encrypter encrypter);
+
+    DWORD RVAToVA(DWORD RVA, MoudleInfo &dllInfo);//工具函数
+
+    void loadDlls(vector<PlainFile> &dlls);     //加载接口
+    void unloadMoudle(MoudleInfo &dllInfo);     //卸载接口
+    void *getFuntionByName(MoudleInfo &dllInfo, const string &name);       //按名字获得导出函数地址
+    void *getFuntionByOrd(MoudleInfo &dllInfo, unsigned int ord);           //按名导出序号
+
+    MoudleInfo getMoudleInfo(const string& moudleName);     //通过模块名，获得模块的加载信息
 
 private:
-    void loadfromstream(MoudleInfo &dllInfo, istream &dllStream);
-    void initPEInfo(MoudleInfo &dllInfo, istream &pe);
-    void copyDllToMem(MoudleInfo &dllInfo, istream &pe);
-    void relocate(MoudleInfo &dllInfo);
-    void fixImportTable(MoudleInfo &dllInfo);
+    unordered_map<string, MoudleInfo> dllMap;
+
+    void loadfromstream(MoudleInfo &dllInfo, istream &dllStream);    //真正的加载函数，loadDll主要是准备工作
+    MoudleInfo *loadByName(const string &name);                      //递归加载时使用
+    void initPEInfo(MoudleInfo &dllInfo, istream &pe);                //读取相关header
+    void copyDllToMem(MoudleInfo &dllInfo, istream &pe);                //拉伸拷贝
+    void relocate(MoudleInfo &dllInfo);                                   //重定位
+    void fixImportAddressTable(MoudleInfo &dllInfo);                        //修复IAT
+    bool runDllMain(MoudleInfo &dllInfo, DWORD dwReason, LPVOID lpReserved);  //调用dllMain
 };

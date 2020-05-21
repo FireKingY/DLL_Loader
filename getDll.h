@@ -2,4 +2,4 @@
 #define BUFF_SIZE 1024
 using namespace std;
 
-shared_ptr<streambuf> getEncryptedDll();
+PlainFile getDll(const string& address, int port);

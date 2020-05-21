@@ -14,42 +14,42 @@ void SimpleCryptProtocol::reverse(char *buf, int start, int end)
 
 void SimpleCryptProtocol::rotate(char *buf, int bufSize, int steps)
 {
-    reverse(buf, 0, steps-1);
+    reverse(buf, 0, steps - 1);
     reverse(buf, steps, bufSize - 1);
     reverse(buf, 0, bufSize - 1);
 }
-void SimpleCryptProtocol::encrypt(const fs::path &filePath, ofstream &ofs)
+void SimpleCryptProtocol::encrypt(const PlainFile &file, ofstream &ofs)
 {
+    cout << "\tencrypting file:\t" << file.fileName << endl;
+
     //每个文件每次加密都随机种子
     srand(std::time(nullptr));
     magicNum = rand();
     //write magicNum
-    if(magicNum == 0)
+    if (magicNum == 0)
         magicNum = 0x77;
     ofs.write(&magicNum, sizeof(magicNum));
 
-    ifstream ifs;
-    ifs.open(filePath, ios_base::binary);
+    istream is(file.pStBuf.get());
 
     //write filename
-    auto fileName = filePath.filename().string();
-    char tmp = 0^magicNum;
-    for(auto& c: fileName)
+    auto fileName = file.fileName;
+    char tmp = 0 ^ magicNum;
+    for (auto &c : fileName)
         c ^= magicNum;
 
-    ofs.write(fileName.c_str(), fileName.length()*sizeof(char));
+    ofs.write(fileName.c_str(), fileName.length() * sizeof(char));
     ofs.write(&tmp, sizeof(char)); // end of filename
 
-
     //write filesize
-    auto fileSize = (uint64_t)fs::file_size(filePath);
+    auto fileSize = file.fileSize;
     ofs.write((char *)(&fileSize), sizeof(fileSize));
     //write encrypted content
     char *buf = new char[fenceSize];
     while (true)
     {
-        ifs.read(buf, fenceSize);
-        if (!ifs.eof())
+        is.read(buf, fenceSize);
+        if (!is.eof())
         {
             //栅栏加密
             rotate(buf, fenceSize, movesteps);
@@ -60,15 +60,16 @@ void SimpleCryptProtocol::encrypt(const fs::path &filePath, ofstream &ofs)
         }
         else
         {
-            ofs.write(buf, ifs.gcount());
+            ofs.write(buf, is.gcount());
             break;
         }
     }
     delete buf;
-    ifs.close();
+
+    cout << "\tfile encrypted"<< endl;
 }
 
-DecryptedFile SimpleCryptProtocol::decrypt(istream &is)
+PlainFile SimpleCryptProtocol::decrypt(istream &is)
 {
     is.read(&magicNum, sizeof(magicNum));
 
@@ -87,19 +88,20 @@ DecryptedFile SimpleCryptProtocol::decrypt(istream &is)
         if (is.eof())
         {
             cur[0] = 0;
-            return DecryptedFile(fileName, nullptr);
+            return PlainFile(fileName, 0, nullptr);
         }
         ++cur;
     }
 
     uint64_t fileSize;
     is.read((char *)&fileSize, sizeof(fileSize));
+    auto remainSize = fileSize;
 
     char *buf = new char[fenceSize];
-    while (fileSize >= (unsigned int)fenceSize)
+    while (remainSize >= (unsigned int)fenceSize)
     {
         is.read(buf, fenceSize);
-        fileSize -= fenceSize;
+        remainSize -= fenceSize;
 
         //解密
         // (a XOR b) XOR b = a
@@ -109,9 +111,14 @@ DecryptedFile SimpleCryptProtocol::decrypt(istream &is)
 
         os.write(buf, fenceSize);
     }
-    is.read(buf, fileSize);
-    os.write(buf, fileSize);
+    is.read(buf, remainSize);
+    os.write(buf, remainSize);
     auto ps = os.rdbuf();
     os.rdbuf(nullptr);
-    return DecryptedFile(fileName, ps);
+
+    cout << "file decrypted" << endl
+         << "\tfile name:\t" << fileName << endl
+         << "\tfile size:\t" << fileSize<< " bytes" << endl;
+
+    return PlainFile(fileName, fileSize, ps);
 }

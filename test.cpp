@@ -15,10 +15,10 @@ void decryptTest(fs::path &filePath, Encrypter cp)
     auto dlls = cp.decryptFile(filePath);
     for (auto &dll : dlls)
     {
-        istream is(dll.pStBuf);
+        istream is(dll.pStBuf.get());
         ofstream ofs;
         auto oPath =filePath.parent_path().string() + "\\" +dll.fileName;
-        ofs.open(oPath + ".dll", ios_base::binary);
+        ofs.open(oPath + ".decrypted", ios_base::binary);
 
         char buf[BUFFER_SIZE];
         while (true)
@@ -75,13 +75,9 @@ bool cryptProtocolTest(CryptProtocol* prot)
 {
     vector<fs::path> fileNames;
     fs::path f1 = "C:\\Users\\Administrator\\source\\repos\\test2\\Release\\test2.dll";
-    fs::path f2 = "C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll";
-    // fs::path f1 = "C:\\Users\\Administrator\\OneDrive\\code\\DLL_Loader\\output\\1";
-    // fs::path f2 = "C:\\Users\\Administrator\\OneDrive\\code\\DLL_Loader\\output\\2";
     fileNames.push_back(f1);
-    fileNames.push_back(f2);
-    auto outputName = ".\\output\\crypted";
-    fs::path outputPath = ".\\output\\crypted";
+    auto outputName = ".\\output\\test2.dll.encrypted";
+    fs::path outputPath = ".\\output\\test2.dll.encrypted";
     Encrypter cp(prot);
     encryptTest(fileNames, outputName, cp);
     decryptTest(outputPath, cp);
@@ -89,7 +85,7 @@ bool cryptProtocolTest(CryptProtocol* prot)
     for(auto& path:fileNames)
     {
         auto p = outputPath.parent_path().string() +"\\"+ path.filename().string();
-        if(!compareTwoFile(path,  p + ".dll"))
+        if(!compareTwoFile(path,  p + ".decrypted"))
             return false;
     }
     return true;

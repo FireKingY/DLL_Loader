@@ -1,7 +1,7 @@
 #include "loader.h"
 #include "SimpleCrytProtocol.h"
 #include "Encrypter.h"
-#include "getEncryptedDll.h"
+#include "getDll.h"
 using namespace std;
 
 string outputPath = ".\\output";
@@ -9,68 +9,42 @@ string outputFilename = "encrypted";
 fs::path outputFileFullPath = outputPath + "\\" + outputFilename;
 fs::path recvFileFullPath = outputPath + "\\" + "recv_" + outputFilename;
 
-void dlltest()
-{
-
- //    LoadLibrary("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
-    // LoadLibrary("C:\\Users\\Administrator\\source\\repos\\test2\\Release\\test2.dll");
-     auto hd = LoadLibrary("C:\\Users\\Administrator\\source\\repos\\InfoReader\\Debug\\InfoReader.dll");
-  //   LoadLibrary("C:\\Users\\Administrator\\source\\repos\\dll3\\Release\\dll3.dll");
-
-  //  FreeLibrary(hd);
-  //  FreeLibrary(hd);
-    if (hd == NULL)
-    {
-        int errCode = GetLastError();
-        cout << errCode << endl;
-        FreeLibrary(hd);
-        return;
-    }
-    typedef void(*FUN)();
-    FUN f = (FUN)GetProcAddress(hd, (char *)"collectInfo");
-    if (f != nullptr)
-        f();
-    FreeLibrary(hd);
-    return;
-}
-
-void encrypt(Encrypter cp)
-{
-    vector<fs::path> fileNames;
-    fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\dll3\\Release\\dll3.dll");
-    fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\testDlll\\Release\\testDlll.dll");
-    fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\test2\\Release\\test2.dll");
-    fileNames.push_back("C:\\Users\\Administrator\\source\\repos\\infoReader\\Debug\\infoReader.dll");
-
-    cp.encryptFiles(fileNames, outputFileFullPath);
-}
-
 int main()
 {
- //   dlltest();
-    // CryptProtocol prot;
+    typedef void (*FUN)();
     SimpleCryptProtocol prot;
     Encrypter cp(&prot);
-    encrypt(cp);
-    auto fileBuf = getEncryptedDll();
-    istream recvdFile(fileBuf.get());
-
     Loader loader(cp);
-    loader.loadEncryptedDlls(recvdFile);
-    // loader.loadEncryptedDlls(recvFileFullPath);
+    PlainFile dllFile;
+    vector<PlainFile> dlls;
 
-    auto moudleInfo = loader.dllMap["inforeader.dll"];
-    auto dll3Info = loader.dllMap["dll3.dll"];
+    //检查是否存在加密后的文件
+    if (filesystem::exists(outputFileFullPath))
+        dlls = cp.decryptFile(outputFileFullPath);
+    else
+    {
+        //通过网络传输获得dll
+        dllFile = getDll("127.0.0.1", 1234);
+        //构造参数
+        dlls.push_back(dllFile);
+        cp.encryptFiles(dlls, outputFileFullPath);
+    }
+    //使用加载模块进行加载
+    loader.loadDlls(dlls);
+    loader.loadDlls(dlls);
+    //获取加载信息
+    auto moudleInfo = loader.getMoudleInfo("InfoReader.dll"); //全小写
 
-    typedef void (*FUN)();
+    //通过两种方式获得导出函数地址
+    FUN cInfo = (FUN)(loader.getFuntionByName(moudleInfo, "collectInfo"));
+    cInfo = (FUN)(loader.getFuntionByOrd(moudleInfo, 2));
 
-    FUN cInfo = reinterpret_cast<FUN>(loader.getFuntionByName(moudleInfo, "collectInfo"));
-    // if (test != nullptr)
-    //     test();
-
+    //调用运行
     if (cInfo != nullptr)
+    {
         cInfo();
+    }
 
-    // loader.unloadMoudle(moudleInfo1);
-    // loader.unloadMoudle(moudleInfo2);
+    loader.unloadMoudle(moudleInfo);
+    loader.unloadMoudle(moudleInfo);
 }

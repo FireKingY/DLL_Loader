@@ -5,8 +5,8 @@
 class SimpleCryptProtocol : public CryptProtocol
 {
 public:
-    void encrypt(const fs::path &filePath, ofstream &ofs);
-    DecryptedFile decrypt(istream &is);
+    void encrypt(const PlainFile &file, ofstream &ofs);
+    PlainFile decrypt(istream &is);
 
 
     // 栅栏加密 栅栏长度
